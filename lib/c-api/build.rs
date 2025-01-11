@@ -1,7 +1,7 @@
 //! This build script aims at:
 //!
 //! * generating the C header files for the C API,
-//! * setting `wasmer-inline-c` up.
+//! * setting `inline-c` up.
 
 use cbindgen::{Builder, Language};
 use std::{
@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const PRE_HEADER: &str = r#"
+const PRE_HEADER: &'static str = r#"
 // Define the `ARCH_X86_X64` constant.
 #if defined(MSVC) && defined(_M_AMD64)
 #  define ARCH_X86_64
@@ -38,34 +38,32 @@ const PRE_HEADER: &str = r#"
 "#;
 
 #[allow(unused)]
-const UNIVERSAL_FEATURE_AS_C_DEFINE: &str = "WASMER_UNIVERSAL_ENABLED";
+const UNIVERSAL_FEATURE_AS_C_DEFINE: &'static str = "WASMER_UNIVERSAL_ENABLED";
 
 #[allow(unused)]
-const COMPILER_FEATURE_AS_C_DEFINE: &str = "WASMER_COMPILER_ENABLED";
+const COMPILER_FEATURE_AS_C_DEFINE: &'static str = "WASMER_COMPILER_ENABLED";
 
 #[allow(unused)]
-const WASI_FEATURE_AS_C_DEFINE: &str = "WASMER_WASI_ENABLED";
+const WASI_FEATURE_AS_C_DEFINE: &'static str = "WASMER_WASI_ENABLED";
 
 #[allow(unused)]
-const MIDDLEWARES_FEATURE_AS_C_DEFINE: &str = "WASMER_MIDDLEWARES_ENABLED";
+const MIDDLEWARES_FEATURE_AS_C_DEFINE: &'static str = "WASMER_MIDDLEWARES_ENABLED";
 
 #[allow(unused)]
-const JSC_FEATURE_AS_C_DEFINE: &str = "WASMER_JSC_BACKEND";
+const EMSCRIPTEN_FEATURE_AS_C_DEFINE: &'static str = "WASMER_EMSCRIPTEN_ENABLED";
 
 macro_rules! map_feature_as_c_define {
     ($feature:expr, $c_define:ident, $accumulator:ident) => {
         #[cfg(feature = $feature)]
         {
-            use std::fmt::Write;
-            let _ = write!(
-                $accumulator,
+            $accumulator.push_str(&format!(
                 r#"
 // The `{feature}` feature has been enabled for this build.
 #define {define}
 "#,
                 feature = $feature,
                 define = $c_define,
-            );
+            ));
         }
     };
 }
@@ -83,7 +81,7 @@ fn main() {
     build_cdylib_link_arg();
 }
 
-/// Check whether we should build the C API headers or set `wasmer-inline-c` up.
+/// Check whether we should build the C API headers or set `inline-c` up.
 fn running_self() -> bool {
     env::var("DOCS_RS").is_err()
         && env::var("_CBINDGEN_IS_RUNNING").is_err()
@@ -132,7 +130,7 @@ fn build_wasm_c_api_headers(crate_dir: &str, out_dir: &str) {
 // within the [`wasmer-c-api`] Rust crate.
 //
 // [`wasm-c-api`]: https://github.com/WebAssembly/wasm-c-api
-// [`wasmer-c-api`]: https://github.com/wasmerio/wasmer/tree/main/lib/c-api
+// [`wasmer-c-api`]: https://github.com/wasmerio/wasmer/tree/master/lib/c-api
 // [documentation]: https://wasmerio.github.io/wasmer/crates/wasmer_c_api/
 
 #if !defined(WASMER_H_PRELUDE)
@@ -142,11 +140,11 @@ fn build_wasm_c_api_headers(crate_dir: &str, out_dir: &str) {
         pre_header = PRE_HEADER
     );
 
-    map_feature_as_c_define!("jsc", JSC_FEATURE_AS_C_DEFINE, pre_header);
-    map_feature_as_c_define!("compiler", UNIVERSAL_FEATURE_AS_C_DEFINE, pre_header);
+    map_feature_as_c_define!("universal", UNIVERSAL_FEATURE_AS_C_DEFINE, pre_header);
     map_feature_as_c_define!("compiler", COMPILER_FEATURE_AS_C_DEFINE, pre_header);
     map_feature_as_c_define!("wasi", WASI_FEATURE_AS_C_DEFINE, pre_header);
     map_feature_as_c_define!("middlewares", MIDDLEWARES_FEATURE_AS_C_DEFINE, pre_header);
+    map_feature_as_c_define!("emscripten", EMSCRIPTEN_FEATURE_AS_C_DEFINE, pre_header);
 
     add_wasmer_version(&mut pre_header);
 
@@ -186,9 +184,7 @@ fn build_wasm_c_api_headers(crate_dir: &str, out_dir: &str) {
 }
 
 fn add_wasmer_version(pre_header: &mut String) {
-    use std::fmt::Write;
-    let _ = write!(
-        pre_header,
+    pre_header.push_str(&format!(
         r#"
 // This file corresponds to the following Wasmer version.
 #define WASMER_VERSION "{full}"
@@ -202,12 +198,12 @@ fn add_wasmer_version(pre_header: &mut String) {
         minor = env!("CARGO_PKG_VERSION_MINOR"),
         patch = env!("CARGO_PKG_VERSION_PATCH"),
         pre = env!("CARGO_PKG_VERSION_PRE"),
-    );
+    ));
 }
 
 /// Create a fresh new `Builder`, already pre-configured.
 fn new_builder(language: Language, crate_dir: &str, include_guard: &str, header: &str) -> Builder {
-    Builder::new()
+    let builder = Builder::new()
         .with_config(cbindgen::Config {
             sort_by: cbindgen::SortKey::Name,
             cpp_compat: true,
@@ -223,6 +219,9 @@ fn new_builder(language: Language, crate_dir: &str, include_guard: &str, header:
         .with_define("feature", "universal", UNIVERSAL_FEATURE_AS_C_DEFINE)
         .with_define("feature", "compiler", COMPILER_FEATURE_AS_C_DEFINE)
         .with_define("feature", "wasi", WASI_FEATURE_AS_C_DEFINE)
+        .with_define("feature", "emscripten", EMSCRIPTEN_FEATURE_AS_C_DEFINE);
+
+    builder
 }
 
 fn build_inline_c_env_vars() {
@@ -286,11 +285,11 @@ fn build_cdylib_link_arg() {
 
     match (os.as_str(), env.as_str()) {
         ("android", _) => {
-            lines.push("-Wl,-soname,libwasmer.so".to_string());
+            lines.push(format!("-Wl,-soname,libwasmer.so"));
         }
 
         ("linux", _) | ("freebsd", _) | ("dragonfly", _) | ("netbsd", _) if env != "musl" => {
-            lines.push("-Wl,-soname,libwasmer.so".to_string());
+            lines.push(format!("-Wl,-soname,libwasmer.so"));
         }
 
         ("macos", _) | ("ios", _) => {
@@ -306,11 +305,11 @@ fn build_cdylib_link_arg() {
             // This is only set up to work on GNU toolchain versions of Rust
             lines.push(format!(
                 "-Wl,--out-implib,{}",
-                shared_object_dir.join("wasmer.dll.a").display()
+                shared_object_dir.join(format!("wasmer.dll.a")).display()
             ));
             lines.push(format!(
                 "-Wl,--output-def,{}",
-                shared_object_dir.join("wasmer.def").display()
+                shared_object_dir.join(format!("wasmer.def")).display()
             ));
         }
 
@@ -346,11 +345,7 @@ fn shared_object_dir() -> PathBuf {
     // We either find `target` or the target triple if cross-compiling.
     if shared_object_dir.file_name() != Some(OsStr::new("target")) {
         let target = env::var("TARGET").unwrap();
-        if shared_object_dir.file_name() != Some(OsStr::new("llvm-cov-target")) {
-            assert_eq!(shared_object_dir.file_name(), Some(OsStr::new(&target)));
-        } else {
-            shared_object_dir.set_file_name(&target);
-        }
+        assert_eq!(shared_object_dir.file_name(), Some(OsStr::new(&target)));
     }
 
     shared_object_dir.push(env::var("PROFILE").unwrap());

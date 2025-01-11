@@ -1,24 +1,19 @@
 use crate::error::{DirectiveError, DirectiveErrors};
 use crate::spectest::spectest_importobject;
 use anyhow::{anyhow, bail, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::str;
 use wasmer::*;
-use wast::core::{AbstractHeapType, HeapType, WastArgCore, WastRetCore};
-use wast::token::{F32, F64};
-use wast::{lexer::Lexer, parser};
-use wast::{QuoteWat, Wast as WWast, WastArg};
 
 /// The wast test script language allows modules to be defined and actions
 /// to be performed on them.
-#[allow(dead_code)]
 pub struct Wast {
     /// Wast files have a concept of a "current" module, which is the most
     /// recently defined.
     current: Option<Instance>,
     /// The Import Object that all wast tests will have
-    import_object: Imports,
+    import_object: ImportObject,
     /// The instances in the test
     instances: HashMap<String, Instance>,
     /// Allowed failures (ideally this should be empty)
@@ -28,7 +23,10 @@ pub struct Wast {
     match_trap_messages: HashMap<String, String>,
     /// If the current module was an allowed failure, we allow test to fail
     current_is_allowed_failure: bool,
-    /// The store in which the tests are executing.
+    /// Extern-ref manager: used for testing extern refs: they're referred to by
+    /// number in WAST, so we map here.
+    extern_refs: BTreeMap<u32, ExternRef>,
+    /// The wasm Store
     store: Store,
     /// A flag indicating if Wast tests should stop as soon as one test fails.
     pub fail_fast: bool,
@@ -39,7 +37,7 @@ pub struct Wast {
 
 impl Wast {
     /// Construct a new instance of `Wast` with a given imports.
-    pub fn new(store: Store, import_object: Imports) -> Self {
+    pub fn new(store: Store, import_object: ImportObject) -> Self {
         Self {
             current: None,
             store,
@@ -48,6 +46,7 @@ impl Wast {
             match_trap_messages: HashMap::new(),
             current_is_allowed_failure: false,
             instances: HashMap::new(),
+            extern_refs: BTreeMap::new(),
             fail_fast: true,
             disable_assert_trap_exhaustion: false,
         }
@@ -73,8 +72,8 @@ impl Wast {
     }
 
     /// Construct a new instance of `Wast` with the spectests imports.
-    pub fn new_with_spectest(mut store: Store) -> Self {
-        let import_object = spectest_importobject(&mut store);
+    pub fn new_with_spectest(store: Store) -> Self {
+        let import_object = spectest_importobject(&store);
         Self::new(store, import_object)
     }
 
@@ -93,50 +92,39 @@ impl Wast {
     }
 
     /// Perform the action portion of a command.
-    fn perform_execute(&mut self, exec: wast::WastExecute<'_>) -> Result<Vec<Value>> {
+    fn perform_execute(&mut self, exec: wast::WastExecute<'_>) -> Result<Vec<Val>> {
         match exec {
             wast::WastExecute::Invoke(invoke) => self.perform_invoke(invoke),
-            wast::WastExecute::Wat(mut module) => {
+            wast::WastExecute::Module(mut module) => {
                 let binary = module.encode()?;
                 let result = self.instantiate(&binary);
                 result.map(|_| Vec::new())
             }
-            wast::WastExecute::Get { module, global, .. } => {
-                self.get(module.map(|s| s.name()), global)
-            }
+            wast::WastExecute::Get { module, global } => self.get(module.map(|s| s.name()), global),
         }
     }
 
-    fn perform_invoke(&mut self, exec: wast::WastInvoke<'_>) -> Result<Vec<Value>> {
+    fn perform_invoke(&mut self, exec: wast::WastInvoke<'_>) -> Result<Vec<Val>> {
         let values = exec
             .args
             .iter()
-            .map(|v| match v {
-                WastArg::Core(v) => self.runtime_value(v),
-                WastArg::Component(_) => bail!("expected component function, found core"),
-            })
+            .map(|a| self.runtime_value(a))
             .collect::<Result<Vec<_>>>()?;
         self.invoke(exec.module.map(|i| i.name()), exec.name, &values)
     }
 
     fn assert_return(
         &self,
-        result: Result<Vec<Value>>,
-        results: &[wast::WastRet<'_>],
+        result: Result<Vec<Val>>,
+        results: &[wast::AssertExpression],
     ) -> Result<()> {
         let values = result?;
         for (v, e) in values.iter().zip(results) {
-            match e {
-                wast::WastRet::Core(e) => {
-                    if self.val_matches(v, e)? {
-                        continue;
-                    }
-                }
-                wast::WastRet::Component(_) => anyhow::bail!("Components not supported yet!"),
+            if self.val_matches(v, e)? {
+                continue;
             }
-
-            if let Value::V128(bits) = v {
-                if let wast::WastRet::Core(WastRetCore::V128(pattern)) = e {
+            if let Val::V128(bits) = v {
+                if let wast::AssertExpression::V128(pattern) = e {
                     bail!(
                         "expected {:?}, got {:?} (v128 bits: {})",
                         e,
@@ -149,24 +137,8 @@ impl Wast {
         }
         Ok(())
     }
-    /// Define a module and register it.
-    fn wat(&mut self, mut wat: QuoteWat<'_>) -> Result<()> {
-        let (is_module, name) = match &wat {
-            QuoteWat::Wat(wast::Wat::Module(m)) => (true, m.id.map(|v| v.name())),
-            QuoteWat::QuoteModule(..) => (true, None),
-            QuoteWat::Wat(wast::Wat::Component(m)) => (false, m.id.map(|v| v.name())),
-            QuoteWat::QuoteComponent(..) => (false, None),
-        };
-        let bytes = wat.encode()?;
-        if is_module {
-            self.module(name, &bytes)?;
-        } else {
-            bail!("component-model support not enabled");
-        }
-        Ok(())
-    }
 
-    fn assert_trap(&self, result: Result<Vec<Value>>, expected: &str) -> Result<()> {
+    fn assert_trap(&self, result: Result<Vec<Val>>, expected: &str) -> Result<()> {
         let actual = match result {
             Ok(values) => bail!("expected trap, got {:?}", values),
             Err(t) => format!("{}", t),
@@ -177,11 +149,14 @@ impl Wast {
         bail!("expected '{}', got '{}'", expected, actual)
     }
 
-    fn run_directive(&mut self, _test: &Path, directive: wast::WastDirective) -> Result<()> {
+    fn run_directive(&mut self, test: &Path, directive: wast::WastDirective) -> Result<()> {
         use wast::WastDirective::*;
 
         match directive {
-            Wat(module) => self.wat(module)?,
+            Module(mut module) => {
+                let binary = module.encode()?;
+                self.module(module.id.map(|s| s.name()), &binary)?;
+            }
             Register {
                 span: _,
                 name,
@@ -225,18 +200,25 @@ impl Wast {
                 module,
                 message,
             } => {
-                let err = match self.wat(module) {
+                let wasm = match module {
+                    wast::QuoteModule::Module(mut m) => m.encode()?,
+                    wast::QuoteModule::Quote(list) => self.parse_quote_module(test, &list)?,
+                };
+                let err = match self.module(None, &wasm) {
                     Ok(()) => bail!("expected module to fail to build"),
                     Err(e) => e,
                 };
                 let error_message = format!("{:?}", err);
-                if !Self::matches_message_assert_invalid(message, &error_message) {
+                if !Self::matches_message_assert_invalid(&message, &error_message) {
                     bail!(
                         "assert_invalid: expected \"{}\", got \"{}\"",
                         message,
                         error_message
                     )
                 }
+            }
+            QuoteModule { .. } => {
+                // Do nothing
             }
             AssertException { .. } => {
                 // Do nothing for now
@@ -247,13 +229,10 @@ impl Wast {
                 message: _,
             } => {
                 let mut module = match module {
-                    wast::QuoteWat::Wat(m) => m,
+                    wast::QuoteModule::Module(m) => m,
                     // This is a `*.wat` parser test which we're not
                     // interested in.
-                    wast::QuoteWat::QuoteModule(_, _) => return Ok(()),
-                    wast::QuoteWat::QuoteComponent(_, _) => {
-                        anyhow::bail!("Components not supported!")
-                    }
+                    wast::QuoteModule::Quote(_) => return Ok(()),
                 };
                 let bytes = module.encode()?;
                 if self.module(None, &bytes).is_ok() {
@@ -271,7 +250,7 @@ impl Wast {
                     Err(e) => e,
                 };
                 let error_message = format!("{:?}", err);
-                if !Self::matches_message_assert_unlinkable(message, &error_message) {
+                if !Self::matches_message_assert_unlinkable(&message, &error_message) {
                     bail!(
                         "assert_unlinkable: expected {}, got {}",
                         message,
@@ -279,8 +258,6 @@ impl Wast {
                     )
                 }
             }
-            Thread(_) => anyhow::bail!("`thread` directives not implemented yet!"),
-            Wait { .. } => anyhow::bail!("`wait` directives not implemented yet!"),
         }
 
         Ok(())
@@ -296,15 +273,12 @@ impl Wast {
             err
         };
 
-        let mut lexer = Lexer::new(wast);
-        lexer.allow_confusing_unicode(filename.ends_with("names.wast"));
-        let buf = wast::parser::ParseBuffer::new_with_lexer(lexer).map_err(adjust_wast)?;
-        let ast = parser::parse::<WWast>(&buf).map_err(adjust_wast)?;
-
+        let buf = wast::parser::ParseBuffer::new(wast).map_err(adjust_wast)?;
+        let ast = wast::parser::parse::<wast::Wast>(&buf).map_err(adjust_wast)?;
         let mut errors = Vec::with_capacity(ast.directives.len());
         for directive in ast.directives {
             let sp = directive.span();
-            if let Err(e) = self.run_directive(test, directive) {
+            if let Err(e) = self.run_directive(&test, directive) {
                 let message = format!("{}", e);
                 // If depends on an instance that doesn't exist
                 if message.contains("no previous instance found") {
@@ -336,28 +310,28 @@ impl Wast {
         Ok(())
     }
 
-    //fn parse_quote_module(&self, test: &Path, source: &[&[u8]]) -> Result<Vec<u8>> {
-    //    let mut ret = String::new();
-    //    for src in source {
-    //        match str::from_utf8(src) {
-    //            Ok(s) => ret.push_str(s),
-    //            Err(_) => bail!("malformed UTF-8 encoding"),
-    //        }
-    //        ret.push(' ');
-    //    }
-    //    let buf = wast::parser::ParseBuffer::new(&ret)?;
-    //    let mut wat = wast::parser::parse::<wast::Wat>(&buf)?;
+    fn parse_quote_module(&self, test: &Path, source: &[&[u8]]) -> Result<Vec<u8>> {
+        let mut ret = String::new();
+        for src in source {
+            match str::from_utf8(src) {
+                Ok(s) => ret.push_str(s),
+                Err(_) => bail!("malformed UTF-8 encoding"),
+            }
+            ret.push_str(" ");
+        }
+        let buf = wast::parser::ParseBuffer::new(&ret)?;
+        let mut wat = wast::parser::parse::<wast::Wat>(&buf)?;
 
-    //    // TODO: when memory64 merges into the proper spec then this should be
-    //    // removed since it will presumably no longer be a text-format error but
-    //    // rather a validation error. Currently all non-memory64 proposals
-    //    // assert that this offset is a text-parser error, whereas with memory64
-    //    // support that error is deferred until later.
-    //    if ret.contains("offset=4294967296") && !test.iter().any(|t| t == "memory64") {
-    //        bail!("i32 constant out of bounds");
-    //    }
-    //    Ok(wat.encode()?)
-    //}
+        // TODO: when memory64 merges into the proper spec then this should be
+        // removed since it will presumably no longer be a text-format error but
+        // rather a validation error. Currently all non-memory64 proposals
+        // assert that this offset is a text-parser error, whereas with memory64
+        // support that error is deferred until later.
+        if ret.contains("offset=4294967296") && !test.iter().any(|t| t == "memory64") {
+            bail!("i32 constant out of bounds");
+        }
+        Ok(wat.module.encode()?)
+    }
 
     /// Run a wast script from a file.
     pub fn run_file(&mut self, path: &Path) -> Result<()> {
@@ -395,7 +369,7 @@ impl Wast {
         Ok(())
     }
 
-    fn instantiate(&mut self, module: &[u8]) -> Result<Instance> {
+    fn instantiate(&self, module: &[u8]) -> Result<Instance> {
         let module = Module::new(&self.store, module)?;
         let mut imports = self.import_object.clone();
 
@@ -408,10 +382,10 @@ impl Wast {
                 .instances
                 .get(module_name)
                 .ok_or_else(|| anyhow!("constant expression required"))?;
-            imports.register_namespace(module_name, instance.exports.clone());
+            imports.register(module_name, instance.exports.clone());
         }
 
-        let instance = Instance::new(&mut self.store, &module, &imports)?;
+        let instance = Instance::new(&module, &imports)?;
         Ok(instance)
     }
 
@@ -427,49 +401,52 @@ impl Wast {
         &mut self,
         instance_name: Option<&str>,
         field: &str,
-        args: &[Value],
-    ) -> Result<Vec<Value>> {
-        let instance = self.get_instance(instance_name)?;
+        args: &[Val],
+    ) -> Result<Vec<Val>> {
+        let instance = self.get_instance(instance_name.as_deref())?;
         let func: &Function = instance.exports.get(field)?;
-        match func.call(&mut self.store, args) {
+        match func.call(args) {
             Ok(result) => Ok(result.into()),
             Err(e) => Err(e.into()),
         }
     }
 
     /// Get the value of an exported global from an instance.
-    fn get(&mut self, instance_name: Option<&str>, field: &str) -> Result<Vec<Value>> {
-        let instance = self.get_instance(instance_name)?;
+    fn get(&mut self, instance_name: Option<&str>, field: &str) -> Result<Vec<Val>> {
+        let instance = self.get_instance(instance_name.as_deref())?;
         let global: &Global = instance.exports.get(field)?;
-        Ok(vec![global.get(&mut self.store)])
+        Ok(vec![global.get()])
     }
 
-    /// Translate from a `script::Value` to a `Value`.
-    fn runtime_value(&mut self, v: &WastArgCore) -> Result<Value> {
-        use wast::core::WastArgCore::*;
+    /// Translate from a `script::Value` to a `Val`.
+    fn runtime_value(&mut self, v: &wast::Expression<'_>) -> Result<Val> {
+        use wast::Instruction::*;
 
-        Ok(match v {
-            I32(x) => Value::I32(*x),
-            I64(x) => Value::I64(*x),
-            F32(x) => Value::F32(f32::from_bits(x.bits)),
-            F64(x) => Value::F64(f64::from_bits(x.bits)),
-            V128(x) => Value::V128(u128::from_le_bytes(x.to_le_bytes())),
-            RefNull(HeapType::Abstract {
-                ty: AbstractHeapType::Func,
-                ..
-            }) => Value::FuncRef(None),
-            RefNull(HeapType::Abstract {
-                ty: AbstractHeapType::Extern,
-                ..
-            }) => Value::null(),
-            RefExtern(number) => Value::ExternRef(Some(ExternRef::new(&mut self.store, *number))),
+        if v.instrs.len() != 1 {
+            bail!("too many instructions in {:?}", v);
+        }
+        Ok(match &v.instrs[0] {
+            I32Const(x) => Val::I32(*x),
+            I64Const(x) => Val::I64(*x),
+            F32Const(x) => Val::F32(f32::from_bits(x.bits)),
+            F64Const(x) => Val::F64(f64::from_bits(x.bits)),
+            V128Const(x) => Val::V128(u128::from_le_bytes(x.to_le_bytes())),
+            RefNull(wast::HeapType::Func) => Val::FuncRef(None),
+            RefNull(wast::HeapType::Extern) => Val::null(),
+            RefExtern(number) => {
+                let extern_ref = self
+                    .extern_refs
+                    .entry(*number)
+                    .or_insert_with(|| ExternRef::new(*number));
+                Val::ExternRef(extern_ref.clone())
+            }
             other => bail!("couldn't convert {:?} to a runtime value", other),
         })
     }
 
     // Checks if the `assert_unlinkable` message matches the expected one
     fn matches_message_assert_unlinkable(expected: &str, actual: &str) -> bool {
-        actual.contains(expected)
+        actual.contains(&expected)
     }
 
     // Checks if the `assert_invalid` message matches the expected one
@@ -488,16 +465,6 @@ impl Wast {
             // handle `unknown memory $NUM` error messages that wasmparser doesn't return yet
             || (expected.contains("unknown memory") && actual.contains("unknown memory"))
             || (expected.contains("unknown memory") && actual.contains("Data segment extends past end of the data section"))
-            || (expected.contains("unknown elem segment") && actual.contains("unknown element segment"))
-            // The same test here is asserted to have one error message in
-            // `memory.wast` and a different error message in
-            // `memory64/memory.wast`, so we equate these two error messages to get
-            // the memory64 tests to pass.
-            || (expected.contains("memory size must be at most 65536 pages") && actual.contains("invalid u32 number"))
-            // the spec test suite asserts a different error message than we print
-            // for this scenario
-            || (expected == "unknown global" && actual.contains("global.get of locally defined global"))
-            || (expected == "immutable global" && actual.contains("global is immutable: cannot modify it with `global.set`"))
     }
 
     // Checks if the `assert_trap` message matches the expected one
@@ -506,41 +473,42 @@ impl Wast {
             || self
                 .match_trap_messages
                 .get(expected)
-                .map_or(false, |alternative| actual.contains(alternative))
+                .map(|alternative| actual.contains(alternative))
+                .unwrap_or(false)
     }
 
-    fn val_matches(&self, actual: &Value, expected: &WastRetCore) -> Result<bool> {
+    fn val_matches(&self, actual: &Val, expected: &wast::AssertExpression) -> Result<bool> {
         Ok(match (actual, expected) {
-            (Value::I32(a), WastRetCore::I32(b)) => a == b,
-            (Value::I64(a), WastRetCore::I64(b)) => a == b,
+            (Val::I32(a), wast::AssertExpression::I32(b)) => a == b,
+            (Val::I64(a), wast::AssertExpression::I64(b)) => a == b,
             // Note that these float comparisons are comparing bits, not float
             // values, so we're testing for bit-for-bit equivalence
-            (Value::F32(a), WastRetCore::F32(b)) => f32_matches(*a, b),
-            (Value::F64(a), WastRetCore::F64(b)) => f64_matches(*a, b),
-            (Value::V128(a), WastRetCore::V128(b)) => v128_matches(*a, b),
+            (Val::F32(a), wast::AssertExpression::F32(b)) => f32_matches(*a, b),
+            (Val::F64(a), wast::AssertExpression::F64(b)) => f64_matches(*a, b),
+            (Val::V128(a), wast::AssertExpression::V128(b)) => v128_matches(*a, b),
+            (Val::FuncRef(None), wast::AssertExpression::RefNull(Some(wast::HeapType::Func))) => {
+                true
+            }
+            (Val::FuncRef(Some(_)), wast::AssertExpression::RefNull(_)) => false,
+            (Val::FuncRef(None), wast::AssertExpression::RefFunc(None)) => true,
+            (Val::FuncRef(None), wast::AssertExpression::RefFunc(Some(_))) => false,
             (
-                Value::FuncRef(None),
-                WastRetCore::RefNull(Some(wast::core::HeapType::Abstract {
-                    ty: AbstractHeapType::Func,
-                    ..
-                })),
-            ) => true,
-            (Value::FuncRef(Some(_)), WastRetCore::RefNull(_)) => false,
-            (Value::FuncRef(None), WastRetCore::RefFunc(None)) => true,
-            (Value::FuncRef(None), WastRetCore::RefFunc(Some(_))) => false,
-            (
-                Value::ExternRef(None),
-                WastRetCore::RefNull(Some(wast::core::HeapType::Abstract {
-                    ty: AbstractHeapType::Extern,
-                    ..
-                })),
-            ) => true,
-            (Value::ExternRef(None), WastRetCore::RefExtern(_)) => false,
+                Val::ExternRef(extern_ref),
+                wast::AssertExpression::RefNull(Some(wast::HeapType::Extern)),
+            ) if extern_ref.is_null() => true,
+            (Val::ExternRef(extern_ref), wast::AssertExpression::RefExtern(_))
+                if extern_ref.is_null() =>
+            {
+                false
+            }
 
-            (Value::ExternRef(Some(_)), WastRetCore::RefNull(_)) => false,
-            (Value::ExternRef(Some(extern_ref)), WastRetCore::RefExtern(num)) => {
-                let x = extern_ref.downcast::<u32>(&self.store).cloned();
-                x == *num
+            (Val::ExternRef(_), wast::AssertExpression::RefNull(_)) => false,
+            (Val::ExternRef(extern_ref), wast::AssertExpression::RefExtern(num)) => {
+                if let Some(stored_extern_ref) = self.extern_refs.get(num) {
+                    extern_ref == stored_extern_ref
+                } else {
+                    false
+                }
             }
             _ => bail!(
                 "don't know how to compare {:?} and {:?} yet",
@@ -567,54 +535,54 @@ fn extract_lane_as_i64(bytes: u128, lane: usize) -> i64 {
     (bytes >> (lane * 64)) as i64
 }
 
-fn f32_matches(actual: f32, expected: &wast::core::NanPattern<F32>) -> bool {
+fn f32_matches(actual: f32, expected: &wast::NanPattern<wast::Float32>) -> bool {
     match expected {
-        wast::core::NanPattern::CanonicalNan => actual.is_canonical_nan(),
-        wast::core::NanPattern::ArithmeticNan => actual.is_arithmetic_nan(),
-        wast::core::NanPattern::Value(expected_value) => actual.to_bits() == expected_value.bits,
+        wast::NanPattern::CanonicalNan => actual.is_canonical_nan(),
+        wast::NanPattern::ArithmeticNan => actual.is_arithmetic_nan(),
+        wast::NanPattern::Value(expected_value) => actual.to_bits() == expected_value.bits,
     }
 }
 
-fn f64_matches(actual: f64, expected: &wast::core::NanPattern<F64>) -> bool {
+fn f64_matches(actual: f64, expected: &wast::NanPattern<wast::Float64>) -> bool {
     match expected {
-        wast::core::NanPattern::CanonicalNan => actual.is_canonical_nan(),
-        wast::core::NanPattern::ArithmeticNan => actual.is_arithmetic_nan(),
-        wast::core::NanPattern::Value(expected_value) => actual.to_bits() == expected_value.bits,
+        wast::NanPattern::CanonicalNan => actual.is_canonical_nan(),
+        wast::NanPattern::ArithmeticNan => actual.is_arithmetic_nan(),
+        wast::NanPattern::Value(expected_value) => actual.to_bits() == expected_value.bits,
     }
 }
 
-fn v128_matches(actual: u128, expected: &wast::core::V128Pattern) -> bool {
+fn v128_matches(actual: u128, expected: &wast::V128Pattern) -> bool {
     match expected {
-        wast::core::V128Pattern::I8x16(b) => b
+        wast::V128Pattern::I8x16(b) => b
             .iter()
             .enumerate()
             .all(|(i, b)| *b == extract_lane_as_i8(actual, i)),
-        wast::core::V128Pattern::I16x8(b) => b
+        wast::V128Pattern::I16x8(b) => b
             .iter()
             .enumerate()
             .all(|(i, b)| *b == extract_lane_as_i16(actual, i)),
-        wast::core::V128Pattern::I32x4(b) => b
+        wast::V128Pattern::I32x4(b) => b
             .iter()
             .enumerate()
             .all(|(i, b)| *b == extract_lane_as_i32(actual, i)),
-        wast::core::V128Pattern::I64x2(b) => b
+        wast::V128Pattern::I64x2(b) => b
             .iter()
             .enumerate()
             .all(|(i, b)| *b == extract_lane_as_i64(actual, i)),
-        wast::core::V128Pattern::F32x4(b) => b.iter().enumerate().all(|(i, b)| {
+        wast::V128Pattern::F32x4(b) => b.iter().enumerate().all(|(i, b)| {
             let a = extract_lane_as_i32(actual, i) as u32;
             f32_matches(f32::from_bits(a), b)
         }),
-        wast::core::V128Pattern::F64x2(b) => b.iter().enumerate().all(|(i, b)| {
+        wast::V128Pattern::F64x2(b) => b.iter().enumerate().all(|(i, b)| {
             let a = extract_lane_as_i64(actual, i) as u64;
             f64_matches(f64::from_bits(a), b)
         }),
     }
 }
 
-fn v128_format(actual: u128, expected: &wast::core::V128Pattern) -> wast::core::V128Pattern {
+fn v128_format(actual: u128, expected: &wast::V128Pattern) -> wast::V128Pattern {
     match expected {
-        wast::core::V128Pattern::I8x16(_) => wast::core::V128Pattern::I8x16([
+        wast::V128Pattern::I8x16(_) => wast::V128Pattern::I8x16([
             extract_lane_as_i8(actual, 0),
             extract_lane_as_i8(actual, 1),
             extract_lane_as_i8(actual, 2),
@@ -632,7 +600,7 @@ fn v128_format(actual: u128, expected: &wast::core::V128Pattern) -> wast::core::
             extract_lane_as_i8(actual, 14),
             extract_lane_as_i8(actual, 15),
         ]),
-        wast::core::V128Pattern::I16x8(_) => wast::core::V128Pattern::I16x8([
+        wast::V128Pattern::I16x8(_) => wast::V128Pattern::I16x8([
             extract_lane_as_i16(actual, 0),
             extract_lane_as_i16(actual, 1),
             extract_lane_as_i16(actual, 2),
@@ -642,35 +610,35 @@ fn v128_format(actual: u128, expected: &wast::core::V128Pattern) -> wast::core::
             extract_lane_as_i16(actual, 6),
             extract_lane_as_i16(actual, 7),
         ]),
-        wast::core::V128Pattern::I32x4(_) => wast::core::V128Pattern::I32x4([
+        wast::V128Pattern::I32x4(_) => wast::V128Pattern::I32x4([
             extract_lane_as_i32(actual, 0),
             extract_lane_as_i32(actual, 1),
             extract_lane_as_i32(actual, 2),
             extract_lane_as_i32(actual, 3),
         ]),
-        wast::core::V128Pattern::I64x2(_) => wast::core::V128Pattern::I64x2([
+        wast::V128Pattern::I64x2(_) => wast::V128Pattern::I64x2([
             extract_lane_as_i64(actual, 0),
             extract_lane_as_i64(actual, 1),
         ]),
-        wast::core::V128Pattern::F32x4(_) => wast::core::V128Pattern::F32x4([
-            wast::core::NanPattern::Value(F32 {
+        wast::V128Pattern::F32x4(_) => wast::V128Pattern::F32x4([
+            wast::NanPattern::Value(wast::Float32 {
                 bits: extract_lane_as_i32(actual, 0) as _,
             }),
-            wast::core::NanPattern::Value(F32 {
+            wast::NanPattern::Value(wast::Float32 {
                 bits: extract_lane_as_i32(actual, 1) as _,
             }),
-            wast::core::NanPattern::Value(F32 {
+            wast::NanPattern::Value(wast::Float32 {
                 bits: extract_lane_as_i32(actual, 2) as _,
             }),
-            wast::core::NanPattern::Value(F32 {
+            wast::NanPattern::Value(wast::Float32 {
                 bits: extract_lane_as_i32(actual, 3) as _,
             }),
         ]),
-        wast::core::V128Pattern::F64x2(_) => wast::core::V128Pattern::F64x2([
-            wast::core::NanPattern::Value(F64 {
+        wast::V128Pattern::F64x2(_) => wast::V128Pattern::F64x2([
+            wast::NanPattern::Value(wast::Float64 {
                 bits: extract_lane_as_i64(actual, 0) as _,
             }),
-            wast::core::NanPattern::Value(F64 {
+            wast::NanPattern::Value(wast::Float64 {
                 bits: extract_lane_as_i64(actual, 1) as _,
             }),
         ]),

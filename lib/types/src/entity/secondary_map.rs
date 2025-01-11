@@ -1,5 +1,5 @@
 // This file contains code from external sources.
-// Attributions: https://github.com/wasmerio/wasmer/blob/main/docs/ATTRIBUTIONS.md
+// Attributions: https://github.com/wasmerio/wasmer/blob/master/ATTRIBUTIONS.md
 
 //! Densely numbered entity references as mapping keys.
 
@@ -11,13 +11,16 @@ use crate::lib::std::marker::PhantomData;
 use crate::lib::std::ops::{Index, IndexMut};
 use crate::lib::std::slice;
 use crate::lib::std::vec::Vec;
-use rkyv::{Archive, Archived, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use loupe::{MemoryUsage, MemoryUsageTracker};
+#[cfg(feature = "enable-rkyv")]
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 #[cfg(feature = "enable-serde")]
 use serde::{
     de::{Deserializer, SeqAccess, Visitor},
     ser::{SerializeSeq, Serializer},
     Deserialize, Serialize,
 };
+use std::mem;
 
 /// A mapping `K -> V` for densely indexed entity references.
 ///
@@ -27,7 +30,11 @@ use serde::{
 ///
 /// The map does not track if an entry for a key has been inserted or not. Instead it behaves as if
 /// all keys have a default entry from the beginning.
-#[derive(Debug, Clone, RkyvSerialize, RkyvDeserialize, Archive)]
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "enable-rkyv",
+    derive(RkyvSerialize, RkyvDeserialize, Archive)
+)]
 pub struct SecondaryMap<K, V>
 where
     K: EntityRef,
@@ -36,22 +43,6 @@ where
     pub(crate) elems: Vec<V>,
     pub(crate) default: V,
     pub(crate) unused: PhantomData<K>,
-}
-
-#[cfg(feature = "artifact-size")]
-impl<K, V> loupe::MemoryUsage for SecondaryMap<K, V>
-where
-    K: EntityRef,
-    V: Clone + loupe::MemoryUsage,
-{
-    fn size_of_val(&self, tracker: &mut dyn loupe::MemoryUsageTracker) -> usize {
-        std::mem::size_of_val(self)
-            + self
-                .elems
-                .iter()
-                .map(|value| value.size_of_val(tracker) - std::mem::size_of_val(value))
-                .sum::<usize>()
-    }
 }
 
 /// Shared `SecondaryMap` implementation for all value types.
@@ -151,45 +142,13 @@ where
     }
 }
 
-impl<K, V> ArchivedSecondaryMap<K, V>
-where
-    K: EntityRef,
-    V: Archive + Clone,
-{
-    /// Get the element at `k` if it exists.
-    pub fn get(&self, k: K) -> Option<&V::Archived> {
-        self.elems.get(k.index())
-    }
-
-    /// Iterator over all values in the `ArchivedPrimaryMap`
-    pub fn values(&self) -> slice::Iter<Archived<V>> {
-        self.elems.iter()
-    }
-
-    /// Iterate over all the keys and values in this map.
-    pub fn iter(&self) -> Iter<K, Archived<V>> {
-        Iter::new(self.elems.iter())
-    }
-}
-
-impl<K, V> std::fmt::Debug for ArchivedSecondaryMap<K, V>
-where
-    K: EntityRef + std::fmt::Debug,
-    V: Archive + Clone,
-    V::Archived: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_map().entries(self.iter()).finish()
-    }
-}
-
 impl<K, V> Default for SecondaryMap<K, V>
 where
     K: EntityRef,
     V: Clone + Default,
 {
-    fn default() -> Self {
-        Self::new()
+    fn default() -> SecondaryMap<K, V> {
+        SecondaryMap::new()
     }
 }
 
@@ -328,6 +287,21 @@ where
     }
 }
 
+impl<K, V> MemoryUsage for SecondaryMap<K, V>
+where
+    K: EntityRef,
+    V: Clone + MemoryUsage,
+{
+    fn size_of_val(&self, tracker: &mut dyn MemoryUsageTracker) -> usize {
+        mem::size_of_val(self)
+            + self
+                .elems
+                .iter()
+                .map(|value| value.size_of_val(tracker) - mem::size_of_val(value))
+                .sum::<usize>()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,7 +312,7 @@ mod tests {
 
     impl EntityRef for E {
         fn new(i: usize) -> Self {
-            Self(i as u32)
+            E(i as u32)
         }
         fn index(self) -> usize {
             self.0 as usize

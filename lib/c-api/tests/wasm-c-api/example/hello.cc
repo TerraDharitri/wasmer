@@ -38,13 +38,6 @@ void run() {
     exit(1);
   }
 
-  // Validate.
-  std::cout << "Validating module..." << std::endl;
-  if (!wasm::Module::validate(store, binary)) {
-    std::cout << "> Error validating module!" << std::endl;
-    exit(1);
-  }
-
   // Compile.
   std::cout << "Compiling module..." << std::endl;
   auto module = wasm::Module::make(store, binary);

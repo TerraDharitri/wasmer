@@ -8,7 +8,7 @@
 //! # Example
 //!
 //! ```rust
-//! # use wasmer_inline_c::assert_c;
+//! # use inline_c::assert_c;
 //! # fn main() {
 //! #    (assert_c! {
 //! # #include "tests/wasmer.h"
@@ -149,7 +149,7 @@ use wasmer_middlewares::{
 /// # Example
 ///
 /// See module's documentation.
-#[allow(non_camel_case_types, clippy::type_complexity)]
+#[allow(non_camel_case_types)]
 pub struct wasmer_metering_t {
     pub(crate) inner: Arc<Metering<Box<dyn Fn(&Operator) -> u64 + Send + Sync>>>,
 }
@@ -201,12 +201,10 @@ pub extern "C" fn wasmer_metering_delete(_metering: Option<Box<wasmer_metering_t
 ///
 /// See module's documentation.
 #[no_mangle]
-pub unsafe extern "C" fn wasmer_metering_get_remaining_points(
-    instance: &mut wasm_instance_t,
-) -> u64 {
-    match get_remaining_points(&mut instance.store.store_mut(), &instance.inner) {
+pub extern "C" fn wasmer_metering_get_remaining_points(instance: &wasm_instance_t) -> u64 {
+    match get_remaining_points(&instance.inner) {
         MeteringPoints::Remaining(value) => value,
-        MeteringPoints::Exhausted => u64::MAX,
+        MeteringPoints::Exhausted => std::u64::MAX,
     }
 }
 
@@ -216,11 +214,9 @@ pub unsafe extern "C" fn wasmer_metering_get_remaining_points(
 ///
 /// See module's documentation.
 #[no_mangle]
-pub unsafe extern "C" fn wasmer_metering_points_are_exhausted(
-    instance: &mut wasm_instance_t,
-) -> bool {
+pub extern "C" fn wasmer_metering_points_are_exhausted(instance: &wasm_instance_t) -> bool {
     matches!(
-        get_remaining_points(&mut instance.store.store_mut(), &instance.inner),
+        get_remaining_points(&instance.inner),
         MeteringPoints::Exhausted,
     )
 }
@@ -234,7 +230,7 @@ pub unsafe extern "C" fn wasmer_metering_points_are_exhausted(
 /// points aren't updated by the WebAssembly module execution
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -298,11 +294,8 @@ pub unsafe extern "C" fn wasmer_metering_points_are_exhausted(
 /// # }
 /// ```
 #[no_mangle]
-pub unsafe extern "C" fn wasmer_metering_set_remaining_points(
-    instance: &mut wasm_instance_t,
-    new_limit: u64,
-) {
-    set_remaining_points(&mut instance.store.store_mut(), &instance.inner, new_limit);
+pub extern "C" fn wasmer_metering_set_remaining_points(instance: &wasm_instance_t, new_limit: u64) {
+    set_remaining_points(&instance.inner, new_limit);
 }
 
 /// Transforms a [`wasmer_metering_t`] into a generic

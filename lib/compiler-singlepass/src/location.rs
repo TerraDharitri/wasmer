@@ -14,7 +14,7 @@ pub enum Multiplier {
     Height = 8,
 }
 
-#[allow(dead_code, clippy::upper_case_acronyms)]
+#[allow(dead_code)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Location<R, S> {
     GPR(R),
@@ -38,17 +38,14 @@ impl<R, S> MaybeImmediate for Location<R, S> {
     }
 }
 
-#[allow(unused)]
 pub trait Reg: Copy + Clone + Eq + PartialEq + Debug + Hash + Ord {
     fn is_callee_save(self) -> bool;
     fn is_reserved(self) -> bool;
     fn into_index(self) -> usize;
     fn from_index(i: usize) -> Result<Self, ()>;
     fn iterator() -> Iter<'static, Self>;
-    fn to_dwarf(self) -> u16;
 }
 
-#[allow(unused)]
 pub trait Descriptor<R: Reg, S: Reg> {
     const FP: R;
     const VMCTX: R;
@@ -67,7 +64,6 @@ pub trait Descriptor<R: Reg, S: Reg> {
     fn return_location() -> Location<R, S>;
 }
 
-#[allow(unused)]
 pub trait CombinedRegister: Copy + Clone + Eq + PartialEq + Debug {
     /// Returns the index of the register.
     fn to_index(&self) -> RegisterIndex;

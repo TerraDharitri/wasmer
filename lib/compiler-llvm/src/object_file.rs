@@ -4,15 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::num::TryFromIntError;
 
-use wasmer_types::{entity::PrimaryMap, CompileError, SourceLoc};
-
-use wasmer_compiler::types::{
-    address_map::{FunctionAddressMap, InstructionAddressMap},
-    function::{CompiledFunctionFrameInfo, CustomSections, FunctionBody},
-    relocation::{Relocation, RelocationKind, RelocationTarget},
-    section::{CustomSection, CustomSectionProtection, SectionBody, SectionIndex},
+use wasmer_compiler::{
+    CompileError, CompiledFunctionFrameInfo, CustomSection, CustomSectionProtection,
+    CustomSections, FunctionAddressMap, FunctionBody, InstructionAddressMap, Relocation,
+    RelocationKind, RelocationTarget, SectionBody, SectionIndex, SourceLoc,
 };
-
+use wasmer_types::entity::{PrimaryMap, SecondaryMap};
 use wasmer_vm::libcalls::LibCall;
 
 fn map_tryfromint_err(error: TryFromIntError) -> CompileError {
@@ -24,7 +21,7 @@ fn map_object_err(error: object::read::Error) -> CompileError {
 }
 
 pub struct CompiledFunction {
-    pub compiled_function: wasmer_compiler::types::function::CompiledFunction,
+    pub compiled_function: wasmer_compiler::CompiledFunction,
     pub custom_sections: CustomSections,
     pub eh_frame_section_indices: Vec<SectionIndex>,
 }
@@ -99,30 +96,7 @@ where
     libcalls.insert("wasmer_vm_memory32_init".to_string(), LibCall::Memory32Init);
     libcalls.insert("wasmer_vm_data_drop".to_string(), LibCall::DataDrop);
     libcalls.insert("wasmer_vm_raise_trap".to_string(), LibCall::RaiseTrap);
-    libcalls.insert(
-        "wasmer_vm_memory32_atomic_wait32".to_string(),
-        LibCall::Memory32AtomicWait32,
-    );
-    libcalls.insert(
-        "wasmer_vm_imported_memory32_atomic_wait32".to_string(),
-        LibCall::ImportedMemory32AtomicWait32,
-    );
-    libcalls.insert(
-        "wasmer_vm_memory32_atomic_wait64".to_string(),
-        LibCall::Memory32AtomicWait64,
-    );
-    libcalls.insert(
-        "wasmer_vm_imported_memory32_atomic_wait64".to_string(),
-        LibCall::ImportedMemory32AtomicWait64,
-    );
-    libcalls.insert(
-        "wasmer_vm_memory32_atomic_notify".to_string(),
-        LibCall::Memory32AtomicNotify,
-    );
-    libcalls.insert(
-        "wasmer_vm_imported_memory32_atomic_notify".to_string(),
-        LibCall::ImportedMemory32AtomicNotify,
-    );
+    libcalls.insert("wasmer_vm_probestack".to_string(), LibCall::Probestack);
 
     let elf = object::File::parse(contents).map_err(map_object_err)?;
 
@@ -196,9 +170,6 @@ where
                     object::RelocationKind::Elf(object::elf::R_X86_64_PC64),
                     0,
                 ) => RelocationKind::X86PCRel8,
-                (object::Architecture::Aarch64, object::RelocationKind::PltRelative, 26) => {
-                    RelocationKind::Arm64Call
-                }
                 (
                     object::Architecture::Aarch64,
                     object::RelocationKind::Elf(object::elf::R_AARCH64_MOVW_UABS_G0_NC),
@@ -219,95 +190,9 @@ where
                     object::RelocationKind::Elf(object::elf::R_AARCH64_MOVW_UABS_G3),
                     0,
                 ) => RelocationKind::Arm64Movw3,
-                (
-                    object::Architecture::Riscv64,
-                    object::RelocationKind::Elf(object::elf::R_RISCV_CALL_PLT),
-                    0,
-                ) => RelocationKind::RiscvCall,
-                (
-                    object::Architecture::Riscv64,
-                    object::RelocationKind::Elf(object::elf::R_RISCV_PCREL_HI20),
-                    0,
-                ) => RelocationKind::RiscvPCRelHi20,
-                (
-                    object::Architecture::Riscv64,
-                    object::RelocationKind::Elf(object::elf::R_RISCV_PCREL_LO12_I),
-                    0,
-                ) => RelocationKind::RiscvPCRelLo12I,
-                (
-                    object::Architecture::LoongArch64,
-                    object::RelocationKind::Elf(object::elf::R_LARCH_ABS_HI20),
-                    0,
-                ) => RelocationKind::LArchAbsHi20,
-                (
-                    object::Architecture::LoongArch64,
-                    object::RelocationKind::Elf(object::elf::R_LARCH_ABS_LO12),
-                    0,
-                ) => RelocationKind::LArchAbsLo12,
-                (
-                    object::Architecture::LoongArch64,
-                    object::RelocationKind::Elf(object::elf::R_LARCH_ABS64_HI12),
-                    0,
-                ) => RelocationKind::LArchAbs64Hi12,
-                (
-                    object::Architecture::LoongArch64,
-                    object::RelocationKind::Elf(object::elf::R_LARCH_ABS64_LO20),
-                    0,
-                ) => RelocationKind::LArchAbs64Lo20,
-                (
-                    object::Architecture::LoongArch64,
-                    // FIXME: Replace with R_LARCH_CALL36 while object is updated
-                    // to 0.32.2.
-                    // https://github.com/gimli-rs/object/commit/16b6d902f6c9b39ec7aaea141460f8981e57dd79
-                    object::RelocationKind::Elf(110),
-                    0,
-                ) => RelocationKind::LArchCall36,
-                (
-                    object::Architecture::LoongArch64,
-                    object::RelocationKind::Elf(object::elf::R_LARCH_PCALA_HI20),
-                    0,
-                ) => RelocationKind::LArchPCAlaHi20,
-                (
-                    object::Architecture::LoongArch64,
-                    object::RelocationKind::Elf(object::elf::R_LARCH_PCALA_LO12),
-                    0,
-                ) => RelocationKind::LArchPCAlaLo12,
-                (
-                    object::Architecture::LoongArch64,
-                    object::RelocationKind::Elf(object::elf::R_LARCH_PCALA64_HI12),
-                    0,
-                ) => RelocationKind::LArchPCAla64Hi12,
-                (
-                    object::Architecture::LoongArch64,
-                    object::RelocationKind::Elf(object::elf::R_LARCH_PCALA64_LO20),
-                    0,
-                ) => RelocationKind::LArchPCAla64Lo20,
-                (
-                    object::Architecture::Aarch64,
-                    object::RelocationKind::Elf(object::elf::R_AARCH64_ADR_PREL_LO21),
-                    0,
-                ) => RelocationKind::Aarch64AdrPrelLo21,
-                (
-                    object::Architecture::Aarch64,
-                    object::RelocationKind::Elf(object::elf::R_AARCH64_ADR_PREL_PG_HI21),
-                    0,
-                ) => RelocationKind::Aarch64AdrPrelPgHi21,
-                (
-                    object::Architecture::Aarch64,
-                    object::RelocationKind::Elf(object::elf::R_AARCH64_LDST128_ABS_LO12_NC),
-                    0,
-                ) => RelocationKind::Aarch64Ldst128AbsLo12Nc,
-                (
-                    object::Architecture::Aarch64,
-                    object::RelocationKind::Elf(object::elf::R_AARCH64_ADD_ABS_LO12_NC),
-                    0,
-                ) => RelocationKind::Aarch64AddAbsLo12Nc,
-                (
-                    object::Architecture::Aarch64,
-                    object::RelocationKind::Elf(object::elf::R_AARCH64_LDST64_ABS_LO12_NC),
-                    0,
-                ) => RelocationKind::Aarch64Ldst64AbsLo12Nc,
-
+                (object::Architecture::Aarch64, object::RelocationKind::PltRelative, 26) => {
+                    RelocationKind::Arm64Call
+                }
                 _ => {
                     return Err(CompileError::Codegen(format!(
                         "unknown relocation {:?}",
@@ -315,7 +200,7 @@ where
                     )));
                 }
             };
-            let mut addend = reloc.addend();
+            let addend = reloc.addend();
             let target = match reloc.target() {
                 object::read::RelocationTarget::Symbol(index) => {
                     let symbol = elf.symbol_by_index(index).map_err(map_object_err)?;
@@ -346,19 +231,6 @@ where
                         symbol_name_to_relocation_target(symbol_name)?
                     {
                         reloc_target
-                    } else if let object::SymbolSection::Section(section_index) = symbol.section() {
-                        // TODO: Encode symbol address into addend, I think this is a bit hacky.
-                        addend = addend.wrapping_add(symbol.address() as i64);
-
-                        if section_index == root_section_index {
-                            root_section_reloc_target
-                        } else {
-                            if visited.insert(section_index) {
-                                worklist.push(section_index);
-                            }
-
-                            elf_section_to_target(section_index)
-                        }
                     } else {
                         return Err(CompileError::Codegen(format!(
                             "relocation targets unknown symbol {:?}",
@@ -478,8 +350,9 @@ where
     };
 
     Ok(CompiledFunction {
-        compiled_function: wasmer_compiler::types::function::CompiledFunction {
+        compiled_function: wasmer_compiler::CompiledFunction {
             body: function_body,
+            jt_offsets: SecondaryMap::new(),
             relocations: relocations
                 .remove_entry(&root_section_index)
                 .map_or(vec![], |(_, v)| v),

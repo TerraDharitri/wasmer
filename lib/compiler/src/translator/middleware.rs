@@ -1,18 +1,19 @@
 //! The middleware parses the function binary bytecodes and transform them
 //! with the chosen functions.
 
+use loupe::MemoryUsage;
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::ops::{Deref, Range};
-use wasmer_types::{LocalFunctionIndex, MiddlewareError, ModuleInfo, WasmResult};
-use wasmparser::{BinaryReader, Operator, ValType, WasmFeatures};
+use std::ops::Deref;
+use wasmer_types::{LocalFunctionIndex, ModuleInfo};
+use wasmparser::{BinaryReader, Operator, Range, Type};
 
-use super::error::from_binaryreadererror_wasmerror;
+use crate::error::{MiddlewareError, WasmResult};
 use crate::translator::environ::FunctionBinaryReader;
 
 /// A shared builder for function middlewares.
-pub trait ModuleMiddleware: Debug + Send + Sync {
+pub trait ModuleMiddleware: Debug + Send + Sync + MemoryUsage {
     /// Generates a `FunctionMiddleware` for a given function.
     ///
     /// Here we generate a separate object for each function instead of executing directly on per-function operators,
@@ -24,9 +25,7 @@ pub trait ModuleMiddleware: Debug + Send + Sync {
     ) -> Box<dyn FunctionMiddleware>;
 
     /// Transforms a `ModuleInfo` struct in-place. This is called before application on functions begins.
-    fn transform_module_info(&self, _: &mut ModuleInfo) -> Result<(), MiddlewareError> {
-        Ok(())
-    }
+    fn transform_module_info(&self, _: &mut ModuleInfo) {}
 }
 
 /// A function middleware specialized for a single function.
@@ -38,6 +37,11 @@ pub trait FunctionMiddleware: Debug {
         state: &mut MiddlewareReaderState<'a>,
     ) -> Result<(), MiddlewareError> {
         state.push_operator(operator);
+        Ok(())
+    }
+
+    /// Processes the given local count.
+    fn feed_local_count(&mut self, _count: u32) -> Result<(), MiddlewareError> {
         Ok(())
     }
 }
@@ -71,7 +75,7 @@ pub trait ModuleMiddlewareChain {
     ) -> Vec<Box<dyn FunctionMiddleware>>;
 
     /// Applies the chain on a `ModuleInfo` struct.
-    fn apply_on_module_info(&self, module_info: &mut ModuleInfo) -> Result<(), MiddlewareError>;
+    fn apply_on_module_info(&self, module_info: &mut ModuleInfo);
 }
 
 impl<T: Deref<Target = dyn ModuleMiddleware>> ModuleMiddlewareChain for [T] {
@@ -86,11 +90,10 @@ impl<T: Deref<Target = dyn ModuleMiddleware>> ModuleMiddlewareChain for [T] {
     }
 
     /// Applies the chain on a `ModuleInfo` struct.
-    fn apply_on_module_info(&self, module_info: &mut ModuleInfo) -> Result<(), MiddlewareError> {
+    fn apply_on_module_info(&self, module_info: &mut ModuleInfo) {
         for item in self {
-            item.transform_module_info(module_info)?;
+            item.transform_module_info(module_info);
         }
-        Ok(())
     }
 }
 
@@ -116,7 +119,7 @@ impl<'a: 'b, 'b> Extend<&'b Operator<'a>> for MiddlewareReaderState<'a> {
 impl<'a> MiddlewareBinaryReader<'a> {
     /// Constructs a `MiddlewareBinaryReader` with an explicit starting offset.
     pub fn new_with_offset(data: &'a [u8], original_offset: usize) -> Self {
-        let inner = BinaryReader::new(data, original_offset, WasmFeatures::default());
+        let inner = BinaryReader::new_with_offset(data, original_offset);
         Self {
             state: MiddlewareReaderState {
                 inner,
@@ -134,43 +137,29 @@ impl<'a> MiddlewareBinaryReader<'a> {
 
 impl<'a> FunctionBinaryReader<'a> for MiddlewareBinaryReader<'a> {
     fn read_local_count(&mut self) -> WasmResult<u32> {
-        self.state
-            .inner
-            .read_var_u32()
-            .map_err(from_binaryreadererror_wasmerror)
+        Ok(self.state.inner.read_var_u32()?)
     }
 
-    fn read_local_decl(&mut self) -> WasmResult<(u32, ValType)> {
-        let count = self
-            .state
-            .inner
-            .read_var_u32()
-            .map_err(from_binaryreadererror_wasmerror)?;
-        let ty: ValType = self
-            .state
-            .inner
-            .read::<ValType>()
-            .map_err(from_binaryreadererror_wasmerror)?;
+    fn read_local_decl(&mut self) -> WasmResult<(u32, Type)> {
+        let count = self.state.inner.read_var_u32()?;
+
+        for stage in &mut self.chain {
+            stage.feed_local_count(count)?;
+        }
+
+        let ty = self.state.inner.read_type()?;
         Ok((count, ty))
     }
 
     fn read_operator(&mut self) -> WasmResult<Operator<'a>> {
         if self.chain.is_empty() {
             // We short-circuit in case no chain is used
-            return self
-                .state
-                .inner
-                .read_operator()
-                .map_err(from_binaryreadererror_wasmerror);
+            return Ok(self.state.inner.read_operator()?);
         }
 
         // Try to fill the `self.pending_operations` buffer, until it is non-empty.
         while self.state.pending_operations.is_empty() {
-            let raw_op = self
-                .state
-                .inner
-                .read_operator()
-                .map_err(from_binaryreadererror_wasmerror)?;
+            let raw_op = self.state.inner.read_operator()?;
 
             // Fill the initial raw operator into pending buffer.
             self.state.pending_operations.push_back(raw_op);
@@ -207,7 +196,7 @@ impl<'a> FunctionBinaryReader<'a> for MiddlewareBinaryReader<'a> {
         self.state.inner.eof()
     }
 
-    fn range(&self) -> Range<usize> {
+    fn range(&self) -> Range {
         self.state.inner.range()
     }
 }

@@ -16,7 +16,7 @@ macro_rules! mvr_test {
                     &stringify!( $( $result_type ),* ).replace(",", "").replace("(", "").replace(")", "") + &r#")))
   (import "host" "callback_fn" (func $callback_fn (type $type)))
   (func (export "test_call") (type $type)
-    local.get 0
+    get_local 0
     call $callback_fn)
   (func (export "test_call_indirect") (type $type)
     (i32.const 1)
@@ -37,7 +37,7 @@ macro_rules! mvr_test {
 
             #[compiler_test(multi_value_imports)]
             fn native(config: crate::Config) -> anyhow::Result<()> {
-                let mut store = config.store();
+                let store = config.store();
                 let module = get_module(&store)?;
                 let instance = wasmer::Instance::new(
                     &module,
@@ -62,7 +62,7 @@ macro_rules! mvr_test {
 
             #[compiler_test(multi_value_imports)]
             fn dynamic(config: crate::Config) -> anyhow::Result<()> {
-                let mut store = config.store();
+                let store = config.store();
                 let module = get_module(&store)?;
                 let callback_fn = wasmer::Function::new(&store, &wasmer::FunctionType::new(vec![wasmer::ValType::I32], vec![ $( <$result_type>::expected_valtype() ),* ]), dynamic_callback_fn);
                 let instance = wasmer::Instance::new(

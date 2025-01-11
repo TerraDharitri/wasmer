@@ -1,5 +1,5 @@
 // This file contains code from external sources.
-// Attributions: https://github.com/wasmerio/wasmer/blob/main/docs/ATTRIBUTIONS.md
+// Attributions: https://github.com/wasmerio/wasmer/blob/master/ATTRIBUTIONS.md
 
 //! A trampoline generator for calling Wasm functions easily.
 //!
@@ -8,16 +8,19 @@
 //! let my_func = instance.exports.get("func");
 //! my_func.call([1, 2])
 //! ```
-use crate::translator::{compiled_function_unwind_info, signature_to_cranelift_ir};
-use cranelift_codegen::{
-    ir::{self, InstBuilder},
-    isa::TargetIsa,
-    Context,
+use super::binemit::TrampolineRelocSink;
+use crate::translator::{
+    compiled_function_unwind_info, signature_to_cranelift_ir, /*transform_jump_table, */
 };
+use cranelift_codegen::ir::InstBuilder;
+use cranelift_codegen::isa::TargetIsa;
+use cranelift_codegen::print_errors::pretty_error;
+use cranelift_codegen::Context;
+use cranelift_codegen::{binemit, ir};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use std::mem;
-use wasmer_compiler::types::function::FunctionBody;
-use wasmer_types::{CompileError, FunctionType};
+use wasmer_compiler::{CompileError, FunctionBody};
+use wasmer_types::FunctionType;
 
 /// Create a trampoline for invoking a WebAssembly function.
 pub fn make_trampoline_function_call(
@@ -43,7 +46,7 @@ pub fn make_trampoline_function_call(
     wrapper_sig.params.push(ir::AbiParam::new(pointer_type));
 
     let mut context = Context::new();
-    context.func = ir::Function::with_name_signature(ir::UserFuncName::user(0, 0), wrapper_sig);
+    context.func = ir::Function::with_name_signature(ir::ExternalName::user(0, 0), wrapper_sig);
 
     let value_size = mem::size_of::<u128>();
     {
@@ -103,15 +106,25 @@ pub fn make_trampoline_function_call(
     }
 
     let mut code_buf = Vec::new();
+    let mut reloc_sink = TrampolineRelocSink {};
+    let mut trap_sink = binemit::NullTrapSink {};
+    let mut stackmap_sink = binemit::NullStackMapSink {};
 
     context
-        .compile_and_emit(isa, &mut code_buf, &mut Default::default())
-        .map_err(|error| CompileError::Codegen(error.inner.to_string()))?;
+        .compile_and_emit(
+            isa,
+            &mut code_buf,
+            &mut reloc_sink,
+            &mut trap_sink,
+            &mut stackmap_sink,
+        )
+        .map_err(|error| CompileError::Codegen(pretty_error(&context.func, Some(isa), error)))?;
 
     let unwind_info = compiled_function_unwind_info(isa, &context)?.maybe_into_to_windows_unwind();
 
     Ok(FunctionBody {
         body: code_buf,
         unwind_info,
+        // jt_offsets: transform_jump_table(context.func.jt_offsets),
     })
 }

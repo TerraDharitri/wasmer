@@ -6,7 +6,7 @@ use wasmer_api::{ExternType, TableType};
 #[allow(non_camel_case_types)]
 pub type wasm_table_size_t = u32;
 
-const LIMITS_MAX_SENTINEL: u32 = u32::MAX;
+const LIMITS_MAX_SENTINEL: u32 = u32::max_value();
 
 #[derive(Debug, Clone)]
 pub(crate) struct WasmTableType {
@@ -47,7 +47,7 @@ impl wasm_tabletype_t {
 
     pub(crate) fn inner(&self) -> &WasmTableType {
         match &self.extern_type.inner {
-            WasmExternType::Table(wasm_table_type) => wasm_table_type,
+            WasmExternType::Table(wasm_table_type) => &wasm_table_type,
             _ => unreachable!("Data corruption: `wasm_tabletype_t` does not contain a table type"),
         }
     }

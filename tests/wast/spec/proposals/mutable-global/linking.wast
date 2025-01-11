@@ -1,5 +1,4 @@
 ;; Functions
-;; xdoardo (2024/09/06): These tests are not in the reference test suite anymore. We keep them for now, but adapt them to "new" keywords (e.g. local.get -> local.get, etc..)
 
 (module $Mf
   (func (export "call") (result i32) (call $g))
@@ -44,7 +43,7 @@
   ;; export mutable globals
   (global $mut_glob (export "mut_glob") (mut i32) (i32.const 142))
   (func (export "get_mut") (result i32) (get_global $mut_glob))
-  (func (export "set_mut") (param i32) (set_global $mut_glob (local.get 0)))
+  (func (export "set_mut") (param i32) (set_global $mut_glob (get_local 0)))
 )
 (register "Mg" $Mg)
 
@@ -99,13 +98,13 @@
   (type (func (result i32)))
   (type (func))
 
-  (table (export "tab") 10 funcref)
+  (table (export "tab") 10 anyfunc)
   (elem (i32.const 2) $g $g $g $g)
   (func $g (result i32) (i32.const 4))
   (func (export "h") (result i32) (i32.const -4))
 
   (func (export "call") (param i32) (result i32)
-    (call_indirect (type 0) (local.get 0))
+    (call_indirect (type 0) (get_local 0))
   )
 )
 (register "Mt" $Mt)
@@ -117,15 +116,15 @@
   (func $f (import "Mt" "call") (param i32) (result i32))
   (func $h (import "Mt" "h") (result i32))
 
-  (table funcref (elem $g $g $g $h $f))
+  (table anyfunc (elem $g $g $g $h $f))
   (func $g (result i32) (i32.const 5))
 
   (export "Mt.call" (func $f))
   (func (export "call Mt.call") (param i32) (result i32)
-    (call $f (local.get 0))
+    (call $f (get_local 0))
   )
   (func (export "call") (param i32) (result i32)
-    (call_indirect (type 1) (local.get 0))
+    (call_indirect (type 1) (get_local 0))
   )
 )
 
@@ -156,12 +155,12 @@
   (type (func (result i32)))
 
   (func $h (import "Mt" "h") (result i32))
-  (table (import "Mt" "tab") 5 funcref)
+  (table (import "Mt" "tab") 5 anyfunc)
   (elem (i32.const 1) $i $h)
   (func $i (result i32) (i32.const 6))
 
   (func (export "call") (param i32) (result i32)
-    (call_indirect (type 0) (local.get 0))
+    (call_indirect (type 0) (get_local 0))
   )
 )
 
@@ -191,7 +190,7 @@
 (assert_trap (invoke $Ot "call" (i32.const 20)) "undefined")
 
 (module
-  (table (import "Mt" "tab") 0 funcref)
+  (table (import "Mt" "tab") 0 anyfunc)
   (elem (i32.const 9) $f)
   (func $f)
 )
@@ -206,7 +205,7 @@
 
 (assert_unlinkable
   (module
-    (table (import "Mt" "tab") 0 funcref)
+    (table (import "Mt" "tab") 0 anyfunc)
     (elem (i32.const 10) $f)
     (func $f)
   )
@@ -215,7 +214,7 @@
 
 (assert_unlinkable
   (module
-    (table (import "Mt" "tab") 10 funcref)
+    (table (import "Mt" "tab") 10 anyfunc)
     (memory (import "Mt" "mem") 1)  ;; does not exist
     (func $f (result i32) (i32.const 0))
     (elem (i32.const 7) $f)
@@ -227,7 +226,7 @@
 
 (assert_unlinkable
   (module
-    (table (import "Mt" "tab") 10 funcref)
+    (table (import "Mt" "tab") 10 anyfunc)
     (func $f (result i32) (i32.const 0))
     (elem (i32.const 7) $f)
     (elem (i32.const 12) $f)  ;; out of bounds
@@ -238,7 +237,7 @@
 
 (assert_unlinkable
   (module
-    (table (import "Mt" "tab") 10 funcref)
+    (table (import "Mt" "tab") 10 anyfunc)
     (func $f (result i32) (i32.const 0))
     (elem (i32.const 7) $f)
     (memory 1)
@@ -256,7 +255,7 @@
   (data (i32.const 10) "\00\01\02\03\04\05\06\07\08\09")
 
   (func (export "load") (param $a i32) (result i32)
-    (i32.load8_u (local.get 0))
+    (i32.load8_u (get_local 0))
   )
 )
 (register "Mm" $Mm)
@@ -269,7 +268,7 @@
 
   (export "Mm.load" (func $loadM))
   (func (export "load") (param $a i32) (result i32)
-    (i32.load8_u (local.get 0))
+    (i32.load8_u (get_local 0))
   )
 )
 
@@ -282,7 +281,7 @@
   (data (i32.const 5) "\a0\a1\a2\a3\a4\a5\a6\a7")
 
   (func (export "load") (param $a i32) (result i32)
-    (i32.load8_u (local.get 0))
+    (i32.load8_u (get_local 0))
   )
 )
 
@@ -308,7 +307,7 @@
   (memory (import "Mm" "mem") 1 8)
 
   (func (export "grow") (param $a i32) (result i32)
-    (memory.grow (local.get 0))
+    (memory.grow (get_local 0))
   )
 )
 
@@ -325,7 +324,7 @@
   (module
     (func $host (import "spectest" "print"))
     (memory (import "Mm" "mem") 1)
-    (table (import "Mm" "tab") 0 funcref)  ;; does not exist
+    (table (import "Mm" "tab") 0 anyfunc)  ;; does not exist
     (data (i32.const 0) "abc")
   )
   "unknown import"
@@ -346,7 +345,7 @@
   (module
     (memory (import "Mm" "mem") 1)
     (data (i32.const 0) "abc")
-    (table 0 funcref)
+    (table 0 anyfunc)
     (func)
     (elem (i32.const 0) 0) ;; out of bounds
   )

@@ -9,7 +9,7 @@ use thiserror::Error;
 use wasmer_api::ExternType;
 
 #[allow(non_camel_case_types)]
-pub type wasm_externkind_t = u8;
+type wasm_externkind_t = u8;
 
 #[allow(non_camel_case_types)]
 #[repr(u8)]

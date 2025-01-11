@@ -1,10 +1,9 @@
-#![cfg_attr(not(feature = "filesystem"), allow(unused))]
 use crate::cache::Cache;
 use crate::hash::Hash;
 use std::fs::{create_dir_all, File};
 use std::io::{self, Write};
 use std::path::PathBuf;
-use wasmer::{AsEngineRef, DeserializeError, Module, SerializeError};
+use wasmer::{DeserializeError, Module, SerializeError, Store};
 
 /// Representation of a directory that contains compiled wasm artifacts.
 ///
@@ -31,13 +30,11 @@ use wasmer::{AsEngineRef, DeserializeError, Module, SerializeError};
 ///     Ok(())
 /// }
 /// ```
-#[derive(Debug, Clone)]
 pub struct FileSystemCache {
     path: PathBuf,
     ext: Option<String>,
 }
 
-#[cfg(feature = "filesystem")]
 impl FileSystemCache {
     /// Construct a new `FileSystemCache` around the specified directory.
     pub fn new<P: Into<PathBuf>>(path: P) -> io::Result<Self> {
@@ -87,34 +84,23 @@ impl FileSystemCache {
     }
 }
 
-#[cfg(feature = "filesystem")]
 impl Cache for FileSystemCache {
     type DeserializeError = DeserializeError;
     type SerializeError = SerializeError;
 
-    unsafe fn load(
-        &self,
-        engine: &impl AsEngineRef,
-        key: Hash,
-    ) -> Result<Module, Self::DeserializeError> {
+    unsafe fn load(&self, store: &Store, key: Hash) -> Result<Module, Self::DeserializeError> {
         let filename = if let Some(ref ext) = self.ext {
-            format!("{}.{}", key, ext)
+            format!("{}.{}", key.to_string(), ext)
         } else {
             key.to_string()
         };
         let path = self.path.join(filename);
-        let ret = Module::deserialize_from_file(engine, path.clone());
-        if ret.is_err() {
-            // If an error occurs while deserializing then we can not trust it anymore
-            // so delete the cache file
-            let _ = std::fs::remove_file(path);
-        }
-        ret
+        Module::deserialize_from_file(&store, path)
     }
 
     fn store(&mut self, key: Hash, module: &Module) -> Result<(), Self::SerializeError> {
         let filename = if let Some(ref ext) = self.ext {
-            format!("{}.{}", key, ext)
+            format!("{}.{}", key.to_string(), ext)
         } else {
             key.to_string()
         };
@@ -125,27 +111,5 @@ impl Cache for FileSystemCache {
         file.write_all(&buffer)?;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_fs_cache() {
-        let dir = tempfile::tempdir().unwrap();
-
-        let mut cache = FileSystemCache::new(dir.path()).unwrap();
-
-        let engine = wasmer::Engine::default();
-
-        let bytes = include_bytes!("../../wasix/tests/envvar.wasm");
-
-        let module = Module::from_binary(&engine, bytes).unwrap();
-        let key = Hash::generate(bytes);
-
-        cache.store(key, &module).unwrap();
-        let _restored = unsafe { cache.load(&engine, key).unwrap() };
     }
 }

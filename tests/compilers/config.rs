@@ -1,26 +1,33 @@
 use std::sync::Arc;
-use wasmer::sys::Features;
-use wasmer::{CompilerConfig, ModuleMiddleware, Store};
+use wasmer::{CompilerConfig, Engine as WasmerEngine, Features, ModuleMiddleware, Store};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Compiler {
     LLVM,
     Cranelift,
     Singlepass,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Engine {
+    Dylib,
+    Universal,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub compiler: Compiler,
+    pub engine: Engine,
     pub features: Option<Features>,
     pub middlewares: Vec<Arc<dyn ModuleMiddleware>>,
     pub canonicalize_nans: bool,
 }
 
 impl Config {
-    pub fn new(compiler: Compiler) -> Self {
+    pub fn new(engine: Engine, compiler: Compiler) -> Self {
         Self {
             compiler,
+            engine,
             features: None,
             canonicalize_nans: false,
             middlewares: vec![],
@@ -42,30 +49,57 @@ impl Config {
     pub fn store(&self) -> Store {
         let compiler_config = self.compiler_config(self.canonicalize_nans);
         let engine = self.engine(compiler_config);
-        Store::new(engine)
+        Store::new(&*engine)
     }
 
     pub fn headless_store(&self) -> Store {
         let engine = self.engine_headless();
-        Store::new(engine)
+        Store::new(&*engine)
     }
 
-    pub fn engine(&self, compiler_config: Box<dyn CompilerConfig>) -> wasmer::Engine {
-        let mut engine = wasmer::sys::EngineBuilder::new(compiler_config);
-        if let Some(ref features) = self.features {
-            engine = engine.set_features(Some(features.clone()));
+    pub fn engine(&self, compiler_config: Box<dyn CompilerConfig>) -> Box<dyn WasmerEngine> {
+        #[cfg(not(feature = "engine"))]
+        compile_error!("Plese enable at least one engine via the features");
+        match &self.engine {
+            #[cfg(feature = "dylib")]
+            Engine::Dylib => {
+                let mut engine = wasmer_engine_dylib::Dylib::new(compiler_config);
+                if let Some(ref features) = self.features {
+                    engine = engine.features(features.clone())
+                }
+                Box::new(engine.engine())
+            }
+            #[cfg(feature = "universal")]
+            Engine::Universal => {
+                let mut engine = wasmer_engine_universal::Universal::new(compiler_config);
+                if let Some(ref features) = self.features {
+                    engine = engine.features(features.clone())
+                }
+                Box::new(engine.engine())
+            }
+            #[allow(unreachable_patterns)]
+            engine => panic!(
+                "The {:?} Engine is not enabled. Please enable it using the features",
+                engine
+            ),
         }
-        engine.engine().into()
     }
 
-    pub fn engine_headless(&self) -> wasmer::Engine {
-        wasmer::sys::EngineBuilder::headless().engine().into()
+    pub fn engine_headless(&self) -> Box<dyn WasmerEngine> {
+        match &self.engine {
+            #[cfg(feature = "dylib")]
+            Engine::Dylib => Box::new(wasmer_engine_dylib::Dylib::headless().engine()),
+            #[cfg(feature = "universal")]
+            Engine::Universal => Box::new(wasmer_engine_universal::Universal::headless().engine()),
+            #[allow(unreachable_patterns)]
+            engine => panic!(
+                "The {:?} Engine is not enabled. Please enable it using the features",
+                engine
+            ),
+        }
     }
 
-    pub fn compiler_config(
-        &self,
-        #[allow(unused_variables)] canonicalize_nans: bool,
-    ) -> Box<dyn CompilerConfig> {
+    pub fn compiler_config(&self, canonicalize_nans: bool) -> Box<dyn CompilerConfig> {
         match &self.compiler {
             #[cfg(feature = "cranelift")]
             Compiler::Cranelift => {
@@ -101,7 +135,6 @@ impl Config {
         }
     }
 
-    #[allow(dead_code)]
     fn add_middlewares(&self, config: &mut dyn CompilerConfig) {
         for middleware in self.middlewares.iter() {
             config.push_middleware(middleware.clone());

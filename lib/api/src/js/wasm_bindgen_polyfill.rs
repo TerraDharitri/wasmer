@@ -16,7 +16,6 @@ extern "C" {
     /// of the given type and value.
     ///
     /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Global)
-    #[allow(unused_doc_comments)]
     #[wasm_bindgen(constructor, js_namespace = WebAssembly, catch)]
     pub fn new(global_descriptor: &Object, value: &JsValue) -> Result<Global, JsValue>;
 
@@ -24,7 +23,6 @@ extern "C" {
     /// returns the value of the global.
     ///
     /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/Global)
-    #[allow(unused_doc_comments)]
     #[wasm_bindgen(method, getter, structural, js_namespace = WebAssembly)]
     pub fn value(this: &Global) -> JsValue;
 

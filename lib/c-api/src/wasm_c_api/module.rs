@@ -1,13 +1,14 @@
 use super::store::wasm_store_t;
 use super::types::{wasm_byte_vec_t, wasm_exporttype_vec_t, wasm_importtype_vec_t};
+use crate::error::update_last_error;
 use std::ptr::NonNull;
+use std::sync::Arc;
 use wasmer_api::Module;
 
 /// Opaque type representing a WebAssembly module.
-#[derive(Clone)]
 #[allow(non_camel_case_types)]
 pub struct wasm_module_t {
-    pub(crate) inner: Module,
+    pub(crate) inner: Arc<Module>,
 }
 
 /// A WebAssembly module contains stateless WebAssembly code that has
@@ -26,15 +27,17 @@ pub struct wasm_module_t {
 /// See the module's documentation.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_module_new(
-    store: Option<&mut wasm_store_t>,
+    store: Option<&wasm_store_t>,
     bytes: Option<&wasm_byte_vec_t>,
 ) -> Option<Box<wasm_module_t>> {
-    let store = store?.inner.store_mut();
+    let store = store?;
     let bytes = bytes?;
 
-    let module = c_try!(Module::from_binary(&store, bytes.as_slice()));
+    let module = c_try!(Module::from_binary(&store.inner, bytes.as_slice()));
 
-    Some(Box::new(wasm_module_t { inner: module }))
+    Some(Box::new(wasm_module_t {
+        inner: Arc::new(module),
+    }))
 }
 
 /// Deletes a WebAssembly module.
@@ -55,7 +58,7 @@ pub unsafe extern "C" fn wasm_module_delete(_module: Option<Box<wasm_module_t>>)
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -88,11 +91,11 @@ pub unsafe extern "C" fn wasm_module_delete(_module: Option<Box<wasm_module_t>>)
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn wasm_module_validate(
-    store: Option<&mut wasm_store_t>,
+    store: Option<&wasm_store_t>,
     bytes: Option<&wasm_byte_vec_t>,
 ) -> bool {
     let store = match store {
-        Some(store) => store.inner.store_mut(),
+        Some(store) => store,
         None => return false,
     };
     let bytes = match bytes {
@@ -100,9 +103,13 @@ pub unsafe extern "C" fn wasm_module_validate(
         None => return false,
     };
 
-    Module::validate(&store, bytes.as_slice())
-        .map(|_| true)
-        .unwrap_or(false)
+    if let Err(error) = Module::validate(&store.inner, bytes.as_slice()) {
+        update_last_error(error);
+
+        false
+    } else {
+        true
+    }
 }
 
 /// Returns an array of the exported types in the module.
@@ -113,7 +120,7 @@ pub unsafe extern "C" fn wasm_module_validate(
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -236,7 +243,7 @@ pub unsafe extern "C" fn wasm_module_exports(
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -253,7 +260,7 @@ pub unsafe extern "C" fn wasm_module_exports(
 ///         "(module\n"
 ///         "  (import \"ns\" \"function\" (func))\n"
 ///         "  (import \"ns\" \"global\" (global f32))\n"
-///         "  (import \"ns\" \"table\" (table 1 2 funcref))\n"
+///         "  (import \"ns\" \"table\" (table 1 2 anyfunc))\n"
 ///         "  (import \"ns\" \"memory\" (memory 3 4)))"
 ///     );
 ///     wasm_byte_vec_t wasm;
@@ -387,7 +394,7 @@ pub unsafe extern "C" fn wasm_module_imports(
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -458,10 +465,12 @@ pub unsafe extern "C" fn wasm_module_deserialize(
 ) -> Option<NonNull<wasm_module_t>> {
     let bytes = bytes?;
 
-    let module = c_try!(Module::deserialize(&store.inner.store(), bytes.as_slice()));
+    let module = c_try!(Module::deserialize(&store.inner, bytes.as_slice()));
 
     Some(NonNull::new_unchecked(Box::into_raw(Box::new(
-        wasm_module_t { inner: module },
+        wasm_module_t {
+            inner: Arc::new(module),
+        },
     ))))
 }
 
@@ -474,18 +483,20 @@ pub unsafe extern "C" fn wasm_module_deserialize(
 /// See [`wasm_module_deserialize`].
 #[no_mangle]
 pub unsafe extern "C" fn wasm_module_serialize(module: &wasm_module_t, out: &mut wasm_byte_vec_t) {
-    let byte_vec = c_try!(module.inner.serialize(); otherwise ());
-    out.set_buffer(byte_vec.to_vec());
+    let byte_vec = match module.inner.serialize() {
+        Ok(byte_vec) => byte_vec,
+        Err(err) => {
+            crate::error::update_last_error(err);
+            return;
+        }
+    };
+    out.set_buffer(byte_vec);
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(target_os = "windows"))]
     use inline_c::assert_c;
-    #[cfg(target_os = "windows")]
-    use wasmer_inline_c::assert_c;
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_module_validate() {
         (assert_c! {
@@ -513,7 +524,6 @@ mod tests {
         .success();
     }
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_module_new() {
         (assert_c! {
@@ -543,7 +553,6 @@ mod tests {
         .success();
     }
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_module_exports() {
         (assert_c! {
@@ -652,7 +661,6 @@ mod tests {
         .success();
     }
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_module_imports() {
         (assert_c! {
@@ -668,7 +676,7 @@ mod tests {
                     "(module\n"
                     "  (import \"ns\" \"function\" (func))\n"
                     "  (import \"ns\" \"global\" (global f32))\n"
-                    "  (import \"ns\" \"table\" (table 1 2 funcref))\n"
+                    "  (import \"ns\" \"table\" (table 1 2 anyfunc))\n"
                     "  (import \"ns\" \"memory\" (memory 3 4)))"
                 );
                 wasm_byte_vec_t wasm;
@@ -771,7 +779,6 @@ mod tests {
         .success();
     }
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_module_serialize() {
         (assert_c! {
@@ -806,7 +813,6 @@ mod tests {
         .success();
     }
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_module_serialize_and_deserialize() {
         (assert_c! {

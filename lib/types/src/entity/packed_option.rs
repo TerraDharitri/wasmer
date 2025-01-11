@@ -1,5 +1,5 @@
 // This file contains code from external sources.
-// Attributions: https://github.com/wasmerio/wasmer/blob/main/docs/ATTRIBUTIONS.md
+// Attributions: https://github.com/wasmerio/wasmer/blob/master/ATTRIBUTIONS.md
 
 //! Compact representation of `Option<T>` for types with a reserved value.
 //!
@@ -101,9 +101,9 @@ impl<T: ReservedValue> From<Option<T>> for PackedOption<T> {
     }
 }
 
-impl<T: ReservedValue> From<PackedOption<T>> for Option<T> {
-    fn from(other: PackedOption<T>) -> Self {
-        other.expand()
+impl<T: ReservedValue> Into<Option<T>> for PackedOption<T> {
+    fn into(self) -> Option<T> {
+        self.expand()
     }
 }
 
@@ -130,7 +130,7 @@ mod tests {
 
     impl ReservedValue for NoC {
         fn reserved_value() -> Self {
-            Self(13)
+            NoC(13)
         }
 
         fn is_reserved_value(&self) -> bool {
@@ -156,7 +156,7 @@ mod tests {
 
     impl ReservedValue for Ent {
         fn reserved_value() -> Self {
-            Self(13)
+            Ent(13)
         }
 
         fn is_reserved_value(&self) -> bool {

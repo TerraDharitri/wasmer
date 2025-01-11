@@ -4,10 +4,9 @@ use inkwell::{
 };
 use smallvec::SmallVec;
 use std::ops::{BitAnd, BitOr, BitOrAssign};
-use wasmer_types::CompileError;
+use wasmer_compiler::CompileError;
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum ControlFrame<'ctx> {
     Block {
         next: BasicBlock<'ctx>,
@@ -141,16 +140,12 @@ impl ExtraInfo {
 
 // Union two ExtraInfos.
 impl BitOr for ExtraInfo {
-    type Output = Result<Self, CompileError>;
+    type Output = Self;
 
-    fn bitor(self, other: Self) -> Self::Output {
-        if (self.has_pending_f32_nan() && other.has_pending_f64_nan())
-            || (self.has_pending_f64_nan() && other.has_pending_f32_nan())
-        {
-            return Err(CompileError::Codegen("Can't produce bitwise or of two different states if there are two different kinds of nan canonicalizations at the same time".to_string()));
-        }
-
-        Ok(ExtraInfo {
+    fn bitor(self, other: Self) -> Self {
+        debug_assert!(!(self.has_pending_f32_nan() && other.has_pending_f64_nan()));
+        debug_assert!(!(self.has_pending_f64_nan() && other.has_pending_f32_nan()));
+        ExtraInfo {
             state: if self.is_arithmetic_f32() || other.is_arithmetic_f32() {
                 ExtraInfo::arithmetic_f32().state
             } else if self.has_pending_f32_nan() || other.has_pending_f32_nan() {
@@ -164,19 +159,19 @@ impl BitOr for ExtraInfo {
             } else {
                 0
             },
-        })
+        }
     }
 }
 impl BitOrAssign for ExtraInfo {
     fn bitor_assign(&mut self, other: Self) {
-        *self = (*self | other).unwrap();
+        *self = *self | other;
     }
 }
 
 // Intersection for ExtraInfo.
 impl BitAnd for ExtraInfo {
-    type Output = Result<Self, CompileError>;
-    fn bitand(self, other: Self) -> Self::Output {
+    type Output = Self;
+    fn bitand(self, other: Self) -> Self {
         // Pending canonicalizations are not safe to discard, or even reorder.
         debug_assert!(
             self.has_pending_f32_nan() == other.has_pending_f32_nan()
@@ -195,10 +190,10 @@ impl BitAnd for ExtraInfo {
             (false, false) => Default::default(),
             (true, false) => ExtraInfo::arithmetic_f32(),
             (false, true) => ExtraInfo::arithmetic_f64(),
-            (true, true) => (ExtraInfo::arithmetic_f32() | ExtraInfo::arithmetic_f64())?,
+            (true, true) => ExtraInfo::arithmetic_f32() | ExtraInfo::arithmetic_f64(),
         };
         match (self.has_pending_f32_nan(), self.has_pending_f64_nan()) {
-            (false, false) => Ok(info),
+            (false, false) => info,
             (true, false) => info | ExtraInfo::pending_f32_nan(),
             (false, true) => info | ExtraInfo::pending_f64_nan(),
             (true, true) => unreachable!("Can't form ExtraInfo with two pending canonicalizations"),
@@ -246,7 +241,7 @@ impl<'ctx> State<'ctx> {
     }
 
     pub fn outermost_frame(&self) -> Result<&ControlFrame<'ctx>, CompileError> {
-        self.control_stack.first().ok_or_else(|| {
+        self.control_stack.get(0).ok_or_else(|| {
             CompileError::Codegen("outermost_frame: invalid control stack depth".to_string())
         })
     }
@@ -306,7 +301,6 @@ impl<'ctx> State<'ctx> {
         Ok((v1, v2))
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn pop2_extra(
         &mut self,
     ) -> Result<
@@ -337,7 +331,6 @@ impl<'ctx> State<'ctx> {
         Ok((v1, v2, v3))
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn pop3_extra(
         &mut self,
     ) -> Result<

@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-mod assets;
-pub mod fixtures;
+//! CLI integration tests
+
+pub mod assets;
 pub mod link_code;
-mod util;
+pub mod util;
 
 pub use assets::*;
 pub use util::*;

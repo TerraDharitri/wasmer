@@ -3,7 +3,6 @@ use wasmer_middlewares::Metering;
 
 use std::sync::Arc;
 use wasmer::wasmparser::Operator;
-use wasmer::FunctionEnv;
 use wasmer::*;
 
 fn cost_always_one(_: &Operator) -> u64 {
@@ -14,21 +13,20 @@ fn run_add_with_limit(mut config: crate::Config, limit: u64) -> Result<()> {
     config
         .middlewares
         .push(Arc::new(Metering::new(limit, cost_always_one)));
-    let mut store = config.store();
+    let store = config.store();
     let wat = r#"(module
         (func (export "add") (param i32 i32) (result i32)
            (i32.add (local.get 0)
                     (local.get 1)))
 )"#;
+    let module = Module::new(&store, wat).unwrap();
 
     let import_object = imports! {};
 
-    let module = Module::new(&store, wat).unwrap();
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
-    let f: TypedFunction<(i32, i32), i32> =
-        instance.exports.get_typed_function(&mut store, "add")?;
-    f.call(&mut store, 4, 6)?;
+    let f: NativeFunc<(i32, i32), i32> = instance.exports.get_native_function("add")?;
+    f.call(4, 6)?;
     Ok(())
 }
 
@@ -36,7 +34,7 @@ fn run_loop(mut config: crate::Config, limit: u64, iter_count: i32) -> Result<()
     config
         .middlewares
         .push(Arc::new(Metering::new(limit, cost_always_one)));
-    let mut store = config.store();
+    let store = config.store();
     let wat = r#"(module
         (func (export "test") (param i32)
            (local i32)
@@ -56,10 +54,10 @@ fn run_loop(mut config: crate::Config, limit: u64, iter_count: i32) -> Result<()
 
     let import_object = imports! {};
 
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
-    let f: TypedFunction<i32, ()> = instance.exports.get_typed_function(&mut store, "test")?;
-    f.call(&mut store, iter_count)?;
+    let f: NativeFunc<i32, ()> = instance.exports.get_native_function("test")?;
+    f.call(iter_count)?;
     Ok(())
 }
 
@@ -89,7 +87,7 @@ fn loop_twice(config: crate::Config) -> Result<()> {
     Ok(())
 }
 
-/// Ported from https://github.com/wasmerio/wasmer/blob/main/tests/middleware_common.rs
+/// Ported from https://github.com/wasmerio/wasmer/blob/master/tests/middleware_common.rs
 #[compiler_test(metering)]
 fn complex_loop(mut config: crate::Config) -> Result<()> {
     // Assemblyscript
@@ -103,7 +101,7 @@ fn complex_loop(mut config: crate::Config) -> Result<()> {
     //    }
     //    return y;
     // }
-    static WAT: &str = r#"
+    static WAT: &'static str = r#"
     (module
         (type $t0 (func (param i32 i32) (result i32)))
         (type $t1 (func))
@@ -111,41 +109,41 @@ fn complex_loop(mut config: crate::Config) -> Result<()> {
         (local $l0 i32)
         block $B0
             i32.const 0
-            local.set $l0
+            set_local $l0
             loop $L1
-            local.get $l0
-            local.get $p0
+            get_local $l0
+            get_local $p0
             i32.lt_s
             i32.eqz
             br_if $B0
-            local.get $l0
+            get_local $l0
             i32.const 1
             i32.rem_s
             i32.const 0
             i32.eq
             if $I2
-                local.get $p1
-                local.get $l0
+                get_local $p1
+                get_local $l0
                 i32.add
-                local.set $p1
+                set_local $p1
             else
-                local.get $p1
-                local.get $l0
+                get_local $p1
+                get_local $l0
                 i32.mul
-                local.set $p1
+                set_local $p1
             end
-            local.get $l0
+            get_local $l0
             i32.const 1
             i32.add
-            local.set $l0
+            set_local $l0
             br $L1
             unreachable
             end
             unreachable
         end
-        local.get $p1)
+        get_local $p1)
         (func $f1 (type $t1))
-        (table $table (export "table") 1 funcref)
+        (table $table (export "table") 1 anyfunc)
         (memory $memory (export "memory") 0)
         (global $g0 i32 (i32.const 8))
         (elem (i32.const 0) $f1))
@@ -153,20 +151,18 @@ fn complex_loop(mut config: crate::Config) -> Result<()> {
     config
         .middlewares
         .push(Arc::new(Metering::new(100, cost_always_one)));
-    let mut store = config.store();
-    let mut env = FunctionEnv::new(&mut store, ());
+    let store = config.store();
 
     let module = Module::new(&store, WAT).unwrap();
 
     let import_object = imports! {};
 
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
-    let f: TypedFunction<(i32, i32), i32> =
-        instance.exports.get_typed_function(&mut store, "add_to")?;
+    let f: NativeFunc<(i32, i32), i32> = instance.exports.get_native_function("add_to")?;
 
     // FIXME: Since now a metering error is signaled with an `unreachable`, it is impossible to verify
     // the error type. Fix this later.
-    f.call(&mut store, 10_000_000, 4).unwrap_err();
+    f.call(10_000_000, 4).unwrap_err();
     Ok(())
 }

@@ -2,14 +2,19 @@
 
 use super::func_environ::TargetEnvironment;
 use crate::std::string::ToString;
-use cranelift_codegen::{
-    binemit::Reloc,
-    ir::{self, AbiParam},
-    isa::TargetFrontendConfig,
-};
+use core::u32;
+use cranelift_codegen::binemit::Reloc;
+use cranelift_codegen::ir::{self, AbiParam};
+use cranelift_codegen::isa::TargetFrontendConfig;
+use cranelift_entity::{EntityRef as CraneliftEntityRef, SecondaryMap as CraneliftSecondaryMap};
 use cranelift_frontend::FunctionBuilder;
-use wasmer_compiler::{types::relocation::RelocationKind, wasmparser};
-use wasmer_types::{FunctionType, LibCall, Type, WasmError, WasmResult};
+use wasmer_compiler::wasm_unsupported;
+use wasmer_compiler::wasmparser;
+use wasmer_compiler::{JumpTable, RelocationKind};
+use wasmer_compiler::{WasmError, WasmResult};
+use wasmer_types::entity::{EntityRef, SecondaryMap};
+use wasmer_types::{FunctionType, Type};
+use wasmer_vm::libcalls::LibCall;
 
 /// Helper function translate a Function signature into Cranelift Ir
 pub fn signature_to_cranelift_ir(
@@ -81,48 +86,47 @@ pub fn irreloc_to_relocationkind(reloc: Reloc) -> RelocationKind {
         Reloc::Abs4 => RelocationKind::Abs4,
         Reloc::Abs8 => RelocationKind::Abs8,
         Reloc::X86PCRel4 => RelocationKind::X86PCRel4,
+        Reloc::X86PCRelRodata4 => RelocationKind::X86PCRelRodata4,
         Reloc::X86CallPCRel4 => RelocationKind::X86CallPCRel4,
         Reloc::X86CallPLTRel4 => RelocationKind::X86CallPLTRel4,
         Reloc::X86GOTPCRel4 => RelocationKind::X86GOTPCRel4,
         Reloc::Arm64Call => RelocationKind::Arm64Call,
-        Reloc::RiscvCallPlt => RelocationKind::RiscvCall,
         _ => panic!("The relocation {} is not yet supported.", reloc),
     }
 }
 
 /// Create a `Block` with the given Wasm parameters.
-pub fn block_with_params<'a, PE: TargetEnvironment + ?Sized>(
+pub fn block_with_params<PE: TargetEnvironment + ?Sized>(
     builder: &mut FunctionBuilder,
-    params: impl Iterator<Item = &'a wasmparser::ValType>,
+    params: &[wasmparser::Type],
     environ: &PE,
 ) -> WasmResult<ir::Block> {
     let block = builder.create_block();
-    for ty in params.into_iter() {
+    for ty in params.iter() {
         match ty {
-            wasmparser::ValType::I32 => {
+            wasmparser::Type::I32 => {
                 builder.append_block_param(block, ir::types::I32);
             }
-            wasmparser::ValType::I64 => {
+            wasmparser::Type::I64 => {
                 builder.append_block_param(block, ir::types::I64);
             }
-            wasmparser::ValType::F32 => {
+            wasmparser::Type::F32 => {
                 builder.append_block_param(block, ir::types::F32);
             }
-            wasmparser::ValType::F64 => {
+            wasmparser::Type::F64 => {
                 builder.append_block_param(block, ir::types::F64);
             }
-            wasmparser::ValType::Ref(ty) => {
-                if ty.is_extern_ref() || ty.is_func_ref() {
-                    builder.append_block_param(block, environ.reference_type());
-                } else {
-                    return Err(WasmError::Unsupported(format!(
-                        "unsupported reference type: {:?}",
-                        ty
-                    )));
-                }
+            wasmparser::Type::ExternRef | wasmparser::Type::FuncRef => {
+                builder.append_block_param(block, environ.reference_type());
             }
-            wasmparser::ValType::V128 => {
+            wasmparser::Type::V128 => {
                 builder.append_block_param(block, ir::types::I8X16);
+            }
+            ty => {
+                return Err(wasm_unsupported!(
+                    "block_with_params: type {:?} in multi-value block's signature",
+                    ty
+                ))
             }
         }
     }
@@ -143,4 +147,17 @@ pub fn f64_translation(x: wasmparser::Ieee64) -> ir::immediates::Ieee64 {
 pub fn get_vmctx_value_label() -> ir::ValueLabel {
     const VMCTX_LABEL: u32 = 0xffff_fffe;
     ir::ValueLabel::from_u32(VMCTX_LABEL)
+}
+
+/// Transforms Cranelift JumpTable's into runtime JumpTables
+pub fn transform_jump_table(
+    jt_offsets: CraneliftSecondaryMap<ir::JumpTable, u32>,
+) -> SecondaryMap<JumpTable, u32> {
+    let mut func_jt_offsets = SecondaryMap::with_capacity(jt_offsets.capacity());
+
+    for (key, value) in jt_offsets.iter() {
+        let new_key = JumpTable::new(key.index());
+        func_jt_offsets[new_key] = *value;
+    }
+    func_jt_offsets
 }

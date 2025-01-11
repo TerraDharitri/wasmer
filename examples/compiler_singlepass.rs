@@ -12,6 +12,7 @@
 
 use wasmer::{imports, wat2wasm, Instance, Module, Store, Value};
 use wasmer_compiler_singlepass::Singlepass;
+use wasmer_engine_universal::Universal;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Let's declare the Wasm module with the text representation.
@@ -32,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let compiler = Singlepass::default();
 
     // Create the store
-    let mut store = Store::new(compiler);
+    let store = Store::new(&Universal::new(compiler).engine());
 
     println!("Compiling module...");
     // Let's compile the Wasm module.
@@ -43,14 +44,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Instantiating module...");
     // Let's instantiate the Wasm module.
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
     let sum = instance.exports.get_function("sum")?;
 
     println!("Calling `sum` function...");
     // Let's call the `sum` exported function. The parameters are a
     // slice of `Value`s. The results are a boxed slice of `Value`s.
-    let results = sum.call(&mut store, &[Value::I32(1), Value::I32(2)])?;
+    let results = sum.call(&[Value::I32(1), Value::I32(2)])?;
 
     println!("Results: {:?}", results);
     assert_eq!(results.to_vec(), vec![Value::I32(3)]);

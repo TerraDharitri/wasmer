@@ -1,19 +1,17 @@
-use std::path::PathBuf;
-
+use crate::store::StoreOptions;
 use anyhow::{bail, Context, Result};
-use clap::Parser;
+use std::path::PathBuf;
+use structopt::StructOpt;
 use wasmer::*;
 
-use crate::store::StoreOptions;
-
-#[derive(Debug, Parser)]
+#[derive(Debug, StructOpt)]
 /// The options for the `wasmer validate` subcommand
 pub struct Validate {
     /// File to validate as WebAssembly
-    #[clap(name = "FILE")]
+    #[structopt(name = "FILE", parse(from_os_str))]
     path: PathBuf,
 
-    #[clap(flatten)]
+    #[structopt(flatten)]
     store: StoreOptions,
 }
 
@@ -24,8 +22,7 @@ impl Validate {
             .context(format!("failed to validate `{}`", self.path.display()))
     }
     fn inner_execute(&self) -> Result<()> {
-        let (store, _compiler_type) = self.store.get_store()?;
-
+        let (store, _engine_type, _compiler_type) = self.store.get_store()?;
         let module_contents = std::fs::read(&self.path)?;
         if !is_wasm(&module_contents) {
             bail!("`wasmer validate` only validates WebAssembly files");

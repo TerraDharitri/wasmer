@@ -19,18 +19,34 @@ impl Compiler {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum Engine {
+    Universal,
+    Dylib,
+    Staticlib,
+}
+
+impl Engine {
+    pub const fn to_flag(self) -> &'static str {
+        match self {
+            Engine::Universal => "--universal",
+            Engine::Dylib => "--dylib",
+            Engine::Staticlib => "--staticlib",
+        }
+    }
+}
+
 pub fn run_code(
     operating_dir: &Path,
     executable_path: &Path,
     args: &[String],
-    stderr: bool,
 ) -> anyhow::Result<String> {
     let output = Command::new(executable_path.canonicalize()?)
         .current_dir(operating_dir)
         .args(args)
         .output()?;
 
-    if !output.status.success() && !stderr {
+    if !output.status.success() {
         bail!(
             "running executable failed: stdout: {}\n\nstderr: {}",
             std::str::from_utf8(&output.stdout)
@@ -39,12 +55,8 @@ pub fn run_code(
                 .expect("stderr is not utf8! need to handle arbitrary bytes")
         );
     }
-    let output = std::str::from_utf8(if stderr {
-        &output.stderr
-    } else {
-        &output.stdout
-    })
-    .expect("output from running executable is not utf-8");
+    let output =
+        std::str::from_utf8(&output.stdout).expect("output from running executable is not utf-8");
 
     Ok(output.to_owned())
 }

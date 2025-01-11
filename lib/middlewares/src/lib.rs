@@ -1,5 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
 pub mod metering;
 
 // The most commonly used symbol are exported at top level of the

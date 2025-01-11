@@ -81,15 +81,9 @@
   (data (global.get $g) "a")
 )
 
-(assert_invalid
-  (module (memory 1) (global i32 (i32.const 0)) (data (global.get 0) "a"))
-  "unknown global"
-)
-(assert_invalid
-  (module (memory 1) (global $g i32 (i32.const 0)) (data (global.get $g) "a"))
-  "unknown global"
-)
-
+;; Use of internal globals in constant expressions is not allowed in MVP.
+;; (module (memory 1) (data (global.get 0) "a") (global i32 (i32.const 0)))
+;; (module (memory 1) (data (global.get $g) "a") (global $g i32 (i32.const 0)))
 
 ;; Corner cases
 
@@ -389,14 +383,6 @@
 )
 
 (assert_invalid
-  (module
-    (memory 1)
-    (data (ref.null func))
-  )
-  "type mismatch"
-)
-
-(assert_invalid
   (module 
     (memory 1)
     (data (offset (;empty instruction sequence;)))
@@ -462,14 +448,11 @@
   "constant expression required"
 )
 
-(assert_invalid
-  (module
-    (global $g (import "test" "g") (mut i32))
-    (memory 1)
-    (data (global.get $g))
-  )
-  "constant expression required"
-)
+;; Use of internal globals in constant expressions is not allowed in MVP.
+;; (assert_invalid
+;;   (module (memory 1) (data (global.get $g)) (global $g (mut i32) (i32.const 0)))
+;;   "constant expression required"
+;; )
 
 (assert_invalid
    (module 

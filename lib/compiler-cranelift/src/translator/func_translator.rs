@@ -1,5 +1,5 @@
 // This file contains code from external sources.
-// Attributions: https://github.com/wasmerio/wasmer/blob/main/docs/ATTRIBUTIONS.md
+// Attributions: https://github.com/wasmerio/wasmer/blob/master/ATTRIBUTIONS.md
 
 //! Standalone WebAssembly to Cranelift IR translator.
 //!
@@ -7,18 +7,20 @@
 //! function to Cranelift IR guided by a `FuncEnvironment` which provides information about the
 //! WebAssembly module and the runtime environment.
 
-use super::code_translator::translate_operator;
+use super::code_translator::{bitcast_arguments, translate_operator, wasm_param_types};
 use super::func_environ::{FuncEnvironment, ReturnMode};
 use super::func_state::FuncTranslationState;
 use super::translation_utils::get_vmctx_value_label;
-use crate::translator::code_translator::bitcast_wasm_returns;
 use cranelift_codegen::entity::EntityRef;
 use cranelift_codegen::ir::{self, Block, InstBuilder, ValueLabel};
 use cranelift_codegen::timing;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
-use wasmer_compiler::{wasm_unsupported, wasmparser};
-use wasmer_compiler::{wptype_to_type, FunctionBinaryReader, ModuleTranslationState};
-use wasmer_types::{LocalFunctionIndex, WasmResult};
+use tracing::info;
+use wasmer_compiler::wasmparser;
+use wasmer_compiler::{
+    wasm_unsupported, wptype_to_type, FunctionBinaryReader, ModuleTranslationState, WasmResult,
+};
+use wasmer_types::LocalFunctionIndex;
 
 /// WebAssembly to Cranelift IR function translator.
 ///
@@ -78,7 +80,7 @@ impl FuncTranslator {
         environ: &mut FE,
     ) -> WasmResult<()> {
         let _tt = timing::wasm_translate_function();
-        tracing::trace!(
+        info!(
             "translate({} bytes, {}{})",
             reader.bytes_remaining(),
             func.name,
@@ -180,12 +182,12 @@ fn parse_local_decls<FE: FuncEnvironment + ?Sized>(
 fn declare_locals<FE: FuncEnvironment + ?Sized>(
     builder: &mut FunctionBuilder,
     count: u32,
-    wasm_type: wasmparser::ValType,
+    wasm_type: wasmparser::Type,
     next_local: &mut usize,
     environ: &mut FE,
 ) -> WasmResult<()> {
     // All locals are initialized to 0.
-    use wasmparser::ValType::*;
+    use wasmparser::Type::*;
     let zeroval = match wasm_type {
         I32 => builder.ins().iconst(ir::types::I32, 0),
         I64 => builder.ins().iconst(ir::types::I64, 0),
@@ -195,13 +197,9 @@ fn declare_locals<FE: FuncEnvironment + ?Sized>(
             let constant_handle = builder.func.dfg.constants.insert([0; 16].to_vec().into());
             builder.ins().vconst(ir::types::I8X16, constant_handle)
         }
-        Ref(ty) => {
-            if ty.is_func_ref() || ty.is_extern_ref() {
-                builder.ins().null(environ.reference_type())
-            } else {
-                return Err(wasm_unsupported!("unsupported reference type: {:?}", ty));
-            }
-        }
+        ExternRef => builder.ins().null(environ.reference_type()),
+        FuncRef => builder.ins().null(environ.reference_type()),
+        ty => return Err(wasm_unsupported!("unsupported local type {:?}", ty)),
     };
 
     let wasmer_ty = wptype_to_type(wasm_type).unwrap();
@@ -240,19 +238,42 @@ fn parse_function_body<FE: FuncEnvironment + ?Sized>(
         environ.after_translate_operator(&op, builder, state)?;
     }
 
+    // When returning we drop all values in locals and on the stack.
+
     // The final `End` operator left us in the exit block where we need to manually add a return
     // instruction.
     //
     // If the exit block is unreachable, it may not have the correct arguments, so we would
     // generate a return instruction that doesn't match the signature.
     if state.reachable {
-        //debug_assert!(builder.is_pristine());
+        debug_assert!(builder.is_pristine());
         if !builder.is_unreachable() {
+            environ.translate_drop_locals(builder)?;
+
+            let _num_elems_to_drop = state.stack.len() - builder.func.signature.returns.len();
+            // drop elements on the stack that we're not returning
+            /*for val in state
+                .stack
+                .iter()
+                .zip(state.metadata_stack.iter())
+                .take(num_elems_to_drop)
+                .filter(|(_, metadata)| metadata.ref_counted)
+                .map(|(val, _)| val)
+            {
+                environ.translate_externref_dec(builder.cursor(), *val)?;
+            }*/
+
+            // TODO: look into what `state.reachable` check above does as well as `!builder.is_unreachable`, do we need that too for ref counting?
+
             match environ.return_mode() {
                 ReturnMode::NormalReturns => {
-                    bitcast_wasm_returns(environ, &mut state.stack, builder);
+                    let return_types = wasm_param_types(&builder.func.signature.returns, |i| {
+                        environ.is_wasm_return(&builder.func.signature, i)
+                    });
+                    bitcast_arguments(&mut state.stack, &return_types, builder);
                     builder.ins().return_(&state.stack)
                 }
+                ReturnMode::FallthroughReturn => builder.ins().fallthrough_return(&state.stack),
             };
         }
     }

@@ -14,7 +14,7 @@ use inkwell::{
     types::FunctionType,
     values::{BasicValueEnum, CallSiteValue, FunctionValue, PointerValue},
 };
-use wasmer_types::CompileError;
+use wasmer_compiler::CompileError;
 use wasmer_types::FunctionType as FuncSig;
 use wasmer_vm::VMOffsets;
 
@@ -59,11 +59,10 @@ pub trait Abi {
         &self,
         alloca_builder: &Builder<'ctx>,
         func_sig: &FuncSig,
-        llvm_fn_ty: &FunctionType<'ctx>,
         ctx_ptr: PointerValue<'ctx>,
+        llvm_fn_ty: &FunctionType<'ctx>,
         values: &[BasicValueEnum<'ctx>],
-        intrinsics: &Intrinsics<'ctx>,
-    ) -> Result<Vec<BasicValueEnum<'ctx>>, CompileError>;
+    ) -> Vec<BasicValueEnum<'ctx>>;
 
     /// Given a CallSite, extract the returned values and return them in a Vec.
     fn rets_from_call<'ctx>(
@@ -72,7 +71,7 @@ pub trait Abi {
         intrinsics: &Intrinsics<'ctx>,
         call_site: CallSiteValue<'ctx>,
         func_sig: &FuncSig,
-    ) -> Result<Vec<BasicValueEnum<'ctx>>, CompileError>;
+    ) -> Vec<BasicValueEnum<'ctx>>;
 
     /// Whether the llvm equivalent of this wasm function has an `sret` attribute.
     fn is_sret(&self, func_sig: &FuncSig) -> Result<bool, CompileError>;

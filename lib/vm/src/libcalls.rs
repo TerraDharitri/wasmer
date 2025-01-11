@@ -1,5 +1,5 @@
 // This file contains code from external sources.
-// Attributions: https://github.com/wasmerio/wasmer/blob/main/docs/ATTRIBUTIONS.md
+// Attributions: https://github.com/wasmerio/wasmer/blob/master/ATTRIBUTIONS.md
 
 //! Runtime library calls.
 //!
@@ -18,7 +18,7 @@
 //!   function frame, we need to raise it. This involves some nasty and quite
 //!   unsafe code under the covers! Notable, after raising the trap, drops
 //!   **will not** be run for local variables! This can lead to things like
-//!   leaking `VMInstance`s which leads to never deallocating JIT code,
+//!   leaking `InstanceHandle`s which leads to never deallocating JIT code,
 //!   instances, and modules! Therefore, always use nested blocks to ensure
 //!   drops run before raising a trap:
 //!
@@ -37,12 +37,18 @@
 
 #![allow(missing_docs)] // For some reason lint fails saying that `LibCall` is not documented, when it actually is
 
+use crate::func_data_registry::VMFuncRef;
 use crate::probestack::PROBESTACK;
 use crate::table::{RawTableElement, TableElement};
 use crate::trap::{raise_lib_trap, Trap, TrapCode};
 use crate::vmcontext::VMContext;
-use crate::{on_host_stack, VMFuncRef};
-pub use wasmer_types::LibCall;
+use crate::VMExternRef;
+use enum_iterator::IntoEnumIterator;
+use loupe::MemoryUsage;
+#[cfg(feature = "enable-rkyv")]
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use serde::{Deserialize, Serialize};
+use std::fmt;
 use wasmer_types::{
     DataIndex, ElemIndex, FunctionIndex, LocalMemoryIndex, LocalTableIndex, MemoryIndex,
     TableIndex, Type,
@@ -149,15 +155,13 @@ pub unsafe extern "C" fn wasmer_vm_memory32_grow(
     delta: u32,
     memory_index: u32,
 ) -> u32 {
-    on_host_stack(|| {
-        let instance = (*vmctx).instance_mut();
-        let memory_index = LocalMemoryIndex::from_u32(memory_index);
+    let instance = (&*vmctx).instance();
+    let memory_index = LocalMemoryIndex::from_u32(memory_index);
 
-        instance
-            .memory_grow(memory_index, delta)
-            .map(|pages| pages.0)
-            .unwrap_or(u32::MAX)
-    })
+    instance
+        .memory_grow(memory_index, delta)
+        .map(|pages| pages.0)
+        .unwrap_or(u32::max_value())
 }
 
 /// Implementation of memory.grow for imported 32-bit memories.
@@ -171,15 +175,13 @@ pub unsafe extern "C" fn wasmer_vm_imported_memory32_grow(
     delta: u32,
     memory_index: u32,
 ) -> u32 {
-    on_host_stack(|| {
-        let instance = (*vmctx).instance_mut();
-        let memory_index = MemoryIndex::from_u32(memory_index);
+    let instance = (&*vmctx).instance();
+    let memory_index = MemoryIndex::from_u32(memory_index);
 
-        instance
-            .imported_memory_grow(memory_index, delta)
-            .map(|pages| pages.0)
-            .unwrap_or(u32::MAX)
-    })
+    instance
+        .imported_memory_grow(memory_index, delta)
+        .map(|pages| pages.0)
+        .unwrap_or(u32::max_value())
 }
 
 /// Implementation of memory.size for locally-defined 32-bit memories.
@@ -189,7 +191,7 @@ pub unsafe extern "C" fn wasmer_vm_imported_memory32_grow(
 /// `vmctx` must be dereferenceable.
 #[no_mangle]
 pub unsafe extern "C" fn wasmer_vm_memory32_size(vmctx: *mut VMContext, memory_index: u32) -> u32 {
-    let instance = (*vmctx).instance();
+    let instance = (&*vmctx).instance();
     let memory_index = LocalMemoryIndex::from_u32(memory_index);
 
     instance.memory_size(memory_index).0
@@ -205,7 +207,7 @@ pub unsafe extern "C" fn wasmer_vm_imported_memory32_size(
     vmctx: *mut VMContext,
     memory_index: u32,
 ) -> u32 {
-    let instance = (*vmctx).instance();
+    let instance = (&*vmctx).instance();
     let memory_index = MemoryIndex::from_u32(memory_index);
 
     instance.imported_memory_size(memory_index).0
@@ -228,14 +230,10 @@ pub unsafe extern "C" fn wasmer_vm_table_copy(
     let result = {
         let dst_table_index = TableIndex::from_u32(dst_table_index);
         let src_table_index = TableIndex::from_u32(src_table_index);
-        if dst_table_index == src_table_index {
-            let table = (*vmctx).instance_mut().get_table(dst_table_index);
-            table.copy_within(dst, src, len)
-        } else {
-            let dst_table = (*vmctx).instance_mut().get_table(dst_table_index);
-            let src_table = (*vmctx).instance_mut().get_table(src_table_index);
-            dst_table.copy(src_table, dst, src, len)
-        }
+        let instance = (&*vmctx).instance();
+        let dst_table = instance.get_table(dst_table_index);
+        let src_table = instance.get_table(src_table_index);
+        dst_table.copy(src_table, dst, src, len)
     };
     if let Err(trap) = result {
         raise_lib_trap(trap);
@@ -259,7 +257,7 @@ pub unsafe extern "C" fn wasmer_vm_table_init(
     let result = {
         let table_index = TableIndex::from_u32(table_index);
         let elem_index = ElemIndex::from_u32(elem_index);
-        let instance = (*vmctx).instance_mut();
+        let instance = (&*vmctx).instance();
         instance.table_init(table_index, elem_index, dst, src, len)
     };
     if let Err(trap) = result {
@@ -282,9 +280,9 @@ pub unsafe extern "C" fn wasmer_vm_table_fill(
 ) {
     let result = {
         let table_index = TableIndex::from_u32(table_index);
-        let instance = (*vmctx).instance_mut();
+        let instance = (&*vmctx).instance();
         let elem = match instance.get_table(table_index).ty().ty {
-            Type::ExternRef => TableElement::ExternRef(item.extern_ref),
+            Type::ExternRef => TableElement::ExternRef(item.extern_ref.into()),
             Type::FuncRef => TableElement::FuncRef(item.func_ref),
             _ => panic!("Unrecognized table type: does not contain references"),
         };
@@ -303,7 +301,7 @@ pub unsafe extern "C" fn wasmer_vm_table_fill(
 /// `vmctx` must be dereferenceable.
 #[no_mangle]
 pub unsafe extern "C" fn wasmer_vm_table_size(vmctx: *mut VMContext, table_index: u32) -> u32 {
-    let instance = (*vmctx).instance();
+    let instance = (&*vmctx).instance();
     let table_index = LocalTableIndex::from_u32(table_index);
 
     instance.table_size(table_index)
@@ -319,7 +317,7 @@ pub unsafe extern "C" fn wasmer_vm_imported_table_size(
     vmctx: *mut VMContext,
     table_index: u32,
 ) -> u32 {
-    let instance = (*vmctx).instance();
+    let instance = (&*vmctx).instance();
     let table_index = TableIndex::from_u32(table_index);
 
     instance.imported_table_size(table_index)
@@ -336,7 +334,7 @@ pub unsafe extern "C" fn wasmer_vm_table_get(
     table_index: u32,
     elem_index: u32,
 ) -> RawTableElement {
-    let instance = (*vmctx).instance();
+    let instance = (&*vmctx).instance();
     let table_index = LocalTableIndex::from_u32(table_index);
 
     // TODO: type checking, maybe have specialized accessors
@@ -357,7 +355,7 @@ pub unsafe extern "C" fn wasmer_vm_imported_table_get(
     table_index: u32,
     elem_index: u32,
 ) -> RawTableElement {
-    let instance = (*vmctx).instance_mut();
+    let instance = (&*vmctx).instance();
     let table_index = TableIndex::from_u32(table_index);
 
     // TODO: type checking, maybe have specialized accessors
@@ -382,7 +380,7 @@ pub unsafe extern "C" fn wasmer_vm_table_set(
     elem_index: u32,
     value: RawTableElement,
 ) {
-    let instance = (*vmctx).instance_mut();
+    let instance = (&*vmctx).instance();
     let table_index = TableIndex::from_u32(table_index);
     let table_index = instance
         .module_ref()
@@ -390,7 +388,7 @@ pub unsafe extern "C" fn wasmer_vm_table_set(
         .unwrap();
 
     let elem = match instance.get_local_table(table_index).ty().ty {
-        Type::ExternRef => TableElement::ExternRef(value.extern_ref),
+        Type::ExternRef => TableElement::ExternRef(value.extern_ref.into()),
         Type::FuncRef => TableElement::FuncRef(value.func_ref),
         _ => panic!("Unrecognized table type: does not contain references"),
     };
@@ -415,10 +413,10 @@ pub unsafe extern "C" fn wasmer_vm_imported_table_set(
     elem_index: u32,
     value: RawTableElement,
 ) {
-    let instance = (*vmctx).instance_mut();
+    let instance = (&*vmctx).instance();
     let table_index = TableIndex::from_u32(table_index);
     let elem = match instance.get_table(table_index).ty().ty {
-        Type::ExternRef => TableElement::ExternRef(value.extern_ref),
+        Type::ExternRef => TableElement::ExternRef(value.extern_ref.into()),
         Type::FuncRef => TableElement::FuncRef(value.func_ref),
         _ => panic!("Unrecognized table type: does not contain references"),
     };
@@ -442,20 +440,18 @@ pub unsafe extern "C" fn wasmer_vm_table_grow(
     delta: u32,
     table_index: u32,
 ) -> u32 {
-    on_host_stack(|| {
-        let instance = (*vmctx).instance_mut();
-        let table_index = LocalTableIndex::from_u32(table_index);
+    let instance = (&*vmctx).instance();
+    let table_index = LocalTableIndex::from_u32(table_index);
 
-        let init_value = match instance.get_local_table(table_index).ty().ty {
-            Type::ExternRef => TableElement::ExternRef(init_value.extern_ref),
-            Type::FuncRef => TableElement::FuncRef(init_value.func_ref),
-            _ => panic!("Unrecognized table type: does not contain references"),
-        };
+    let init_value = match instance.get_local_table(table_index).ty().ty {
+        Type::ExternRef => TableElement::ExternRef(init_value.extern_ref.into()),
+        Type::FuncRef => TableElement::FuncRef(init_value.func_ref),
+        _ => panic!("Unrecognized table type: does not contain references"),
+    };
 
-        instance
-            .table_grow(table_index, delta, init_value)
-            .unwrap_or(u32::MAX)
-    })
+    instance
+        .table_grow(table_index, delta, init_value)
+        .unwrap_or(u32::max_value())
 }
 
 /// Implementation of `table.grow` for imported tables.
@@ -470,19 +466,17 @@ pub unsafe extern "C" fn wasmer_vm_imported_table_grow(
     delta: u32,
     table_index: u32,
 ) -> u32 {
-    on_host_stack(|| {
-        let instance = (*vmctx).instance_mut();
-        let table_index = TableIndex::from_u32(table_index);
-        let init_value = match instance.get_table(table_index).ty().ty {
-            Type::ExternRef => TableElement::ExternRef(init_value.extern_ref),
-            Type::FuncRef => TableElement::FuncRef(init_value.func_ref),
-            _ => panic!("Unrecognized table type: does not contain references"),
-        };
+    let instance = (&*vmctx).instance();
+    let table_index = TableIndex::from_u32(table_index);
+    let init_value = match instance.get_table(table_index).ty().ty {
+        Type::ExternRef => TableElement::ExternRef(init_value.extern_ref.into()),
+        Type::FuncRef => TableElement::FuncRef(init_value.func_ref),
+        _ => panic!("Unrecognized table type: does not contain references"),
+    };
 
-        instance
-            .imported_table_grow(table_index, delta, init_value)
-            .unwrap_or(u32::MAX)
-    })
+    instance
+        .imported_table_grow(table_index, delta, init_value)
+        .unwrap_or(u32::max_value())
 }
 
 /// Implementation of `func.ref`.
@@ -495,10 +489,35 @@ pub unsafe extern "C" fn wasmer_vm_func_ref(
     vmctx: *mut VMContext,
     function_index: u32,
 ) -> VMFuncRef {
-    let instance = (*vmctx).instance();
+    let instance = (&*vmctx).instance();
     let function_index = FunctionIndex::from_u32(function_index);
 
     instance.func_ref(function_index).unwrap()
+}
+
+/// Implementation of externref increment
+///
+/// # Safety
+///
+/// `vmctx` must be dereferenceable.
+///
+/// This function must only be called at precise locations to prevent memory leaks.
+#[no_mangle]
+pub unsafe extern "C" fn wasmer_vm_externref_inc(externref: VMExternRef) {
+    externref.ref_clone();
+}
+
+/// Implementation of externref decrement
+///
+/// # Safety
+///
+/// `vmctx` must be dereferenceable.
+///
+/// This function must only be called at precise locations, otherwise use-after-free
+/// and other serious memory bugs may occur.
+#[no_mangle]
+pub unsafe extern "C" fn wasmer_vm_externref_dec(mut externref: VMExternRef) {
+    externref.ref_drop()
 }
 
 /// Implementation of `elem.drop`.
@@ -508,11 +527,9 @@ pub unsafe extern "C" fn wasmer_vm_func_ref(
 /// `vmctx` must be dereferenceable.
 #[no_mangle]
 pub unsafe extern "C" fn wasmer_vm_elem_drop(vmctx: *mut VMContext, elem_index: u32) {
-    on_host_stack(|| {
-        let elem_index = ElemIndex::from_u32(elem_index);
-        let instance = (*vmctx).instance();
-        instance.elem_drop(elem_index);
-    })
+    let elem_index = ElemIndex::from_u32(elem_index);
+    let instance = (&*vmctx).instance();
+    instance.elem_drop(elem_index);
 }
 
 /// Implementation of `memory.copy` for locally defined memories.
@@ -530,7 +547,7 @@ pub unsafe extern "C" fn wasmer_vm_memory32_copy(
 ) {
     let result = {
         let memory_index = LocalMemoryIndex::from_u32(memory_index);
-        let instance = (*vmctx).instance();
+        let instance = (&*vmctx).instance();
         instance.local_memory_copy(memory_index, dst, src, len)
     };
     if let Err(trap) = result {
@@ -553,7 +570,7 @@ pub unsafe extern "C" fn wasmer_vm_imported_memory32_copy(
 ) {
     let result = {
         let memory_index = MemoryIndex::from_u32(memory_index);
-        let instance = (*vmctx).instance();
+        let instance = (&*vmctx).instance();
         instance.imported_memory_copy(memory_index, dst, src, len)
     };
     if let Err(trap) = result {
@@ -576,7 +593,7 @@ pub unsafe extern "C" fn wasmer_vm_memory32_fill(
 ) {
     let result = {
         let memory_index = LocalMemoryIndex::from_u32(memory_index);
-        let instance = (*vmctx).instance();
+        let instance = (&*vmctx).instance();
         instance.local_memory_fill(memory_index, dst, val, len)
     };
     if let Err(trap) = result {
@@ -599,7 +616,7 @@ pub unsafe extern "C" fn wasmer_vm_imported_memory32_fill(
 ) {
     let result = {
         let memory_index = MemoryIndex::from_u32(memory_index);
-        let instance = (*vmctx).instance();
+        let instance = (&*vmctx).instance();
         instance.imported_memory_fill(memory_index, dst, val, len)
     };
     if let Err(trap) = result {
@@ -624,7 +641,7 @@ pub unsafe extern "C" fn wasmer_vm_memory32_init(
     let result = {
         let memory_index = MemoryIndex::from_u32(memory_index);
         let data_index = DataIndex::from_u32(data_index);
-        let instance = (*vmctx).instance();
+        let instance = (&*vmctx).instance();
         instance.memory_init(memory_index, data_index, dst, src, len)
     };
     if let Err(trap) = result {
@@ -639,11 +656,9 @@ pub unsafe extern "C" fn wasmer_vm_memory32_init(
 /// `vmctx` must be dereferenceable.
 #[no_mangle]
 pub unsafe extern "C" fn wasmer_vm_data_drop(vmctx: *mut VMContext, data_index: u32) {
-    on_host_stack(|| {
-        let data_index = DataIndex::from_u32(data_index);
-        let instance = (*vmctx).instance();
-        instance.data_drop(data_index)
-    })
+    let data_index = DataIndex::from_u32(data_index);
+    let instance = (&*vmctx).instance();
+    instance.data_drop(data_index)
 }
 
 /// Implementation for raising a trap
@@ -667,193 +682,195 @@ pub unsafe extern "C" fn wasmer_vm_raise_trap(trap_code: TrapCode) -> ! {
 #[no_mangle]
 pub static wasmer_vm_probestack: unsafe extern "C" fn() = PROBESTACK;
 
-/// Implementation of memory.wait32 for locally-defined 32-bit memories.
+/// The name of a runtime library routine.
 ///
-/// # Safety
-///
-/// `vmctx` must be dereferenceable.
-#[no_mangle]
-pub unsafe extern "C" fn wasmer_vm_memory32_atomic_wait32(
-    vmctx: *mut VMContext,
-    memory_index: u32,
-    dst: u32,
-    val: u32,
-    timeout: i64,
-) -> u32 {
-    let result = {
-        let instance = (*vmctx).instance_mut();
-        let memory_index = LocalMemoryIndex::from_u32(memory_index);
+/// This list is likely to grow over time.
+#[cfg_attr(
+    feature = "enable-rkyv",
+    derive(RkyvSerialize, RkyvDeserialize, Archive)
+)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, MemoryUsage, IntoEnumIterator,
+)]
+pub enum LibCall {
+    /// ceil.f32
+    CeilF32,
 
-        instance.local_memory_wait32(memory_index, dst, val, timeout)
-    };
-    if let Err(trap) = result {
-        raise_lib_trap(trap);
-    }
-    result.unwrap()
+    /// ceil.f64
+    CeilF64,
+
+    /// floor.f32
+    FloorF32,
+
+    /// floor.f64
+    FloorF64,
+
+    /// nearest.f32
+    NearestF32,
+
+    /// nearest.f64
+    NearestF64,
+
+    /// trunc.f32
+    TruncF32,
+
+    /// trunc.f64
+    TruncF64,
+
+    /// memory.size for local functions
+    Memory32Size,
+
+    /// memory.size for imported functions
+    ImportedMemory32Size,
+
+    /// table.copy
+    TableCopy,
+
+    /// table.init
+    TableInit,
+
+    /// table.fill
+    TableFill,
+
+    /// table.size for local tables
+    TableSize,
+
+    /// table.size for imported tables
+    ImportedTableSize,
+
+    /// table.get for local tables
+    TableGet,
+
+    /// table.get for imported tables
+    ImportedTableGet,
+
+    /// table.set for local tables
+    TableSet,
+
+    /// table.set for imported tables
+    ImportedTableSet,
+
+    /// table.grow for local tables
+    TableGrow,
+
+    /// table.grow for imported tables
+    ImportedTableGrow,
+
+    /// ref.func
+    FuncRef,
+
+    /// elem.drop
+    ElemDrop,
+
+    /// memory.copy for local memories
+    Memory32Copy,
+
+    /// memory.copy for imported memories
+    ImportedMemory32Copy,
+
+    /// memory.fill for local memories
+    Memory32Fill,
+
+    /// memory.fill for imported memories
+    ImportedMemory32Fill,
+
+    /// memory.init
+    Memory32Init,
+
+    /// data.drop
+    DataDrop,
+
+    /// A custom trap
+    RaiseTrap,
+
+    /// probe for stack overflow. These are emitted for functions which need
+    /// when the `enable_probestack` setting is true.
+    Probestack,
 }
 
-/// Implementation of memory.wait32 for imported 32-bit memories.
-///
-/// # Safety
-///
-/// `vmctx` must be dereferenceable.
-#[no_mangle]
-pub unsafe extern "C" fn wasmer_vm_imported_memory32_atomic_wait32(
-    vmctx: *mut VMContext,
-    memory_index: u32,
-    dst: u32,
-    val: u32,
-    timeout: i64,
-) -> u32 {
-    let result = {
-        let instance = (*vmctx).instance_mut();
-        let memory_index = MemoryIndex::from_u32(memory_index);
-
-        instance.imported_memory_wait32(memory_index, dst, val, timeout)
-    };
-    if let Err(trap) = result {
-        raise_lib_trap(trap);
+impl LibCall {
+    /// The function pointer to a libcall
+    pub fn function_pointer(self) -> usize {
+        match self {
+            Self::CeilF32 => wasmer_vm_f32_ceil as usize,
+            Self::CeilF64 => wasmer_vm_f64_ceil as usize,
+            Self::FloorF32 => wasmer_vm_f32_floor as usize,
+            Self::FloorF64 => wasmer_vm_f64_floor as usize,
+            Self::NearestF32 => wasmer_vm_f32_nearest as usize,
+            Self::NearestF64 => wasmer_vm_f64_nearest as usize,
+            Self::TruncF32 => wasmer_vm_f32_trunc as usize,
+            Self::TruncF64 => wasmer_vm_f64_trunc as usize,
+            Self::Memory32Size => wasmer_vm_memory32_size as usize,
+            Self::ImportedMemory32Size => wasmer_vm_imported_memory32_size as usize,
+            Self::TableCopy => wasmer_vm_table_copy as usize,
+            Self::TableInit => wasmer_vm_table_init as usize,
+            Self::TableFill => wasmer_vm_table_fill as usize,
+            Self::TableSize => wasmer_vm_table_size as usize,
+            Self::ImportedTableSize => wasmer_vm_imported_table_size as usize,
+            Self::TableGet => wasmer_vm_table_get as usize,
+            Self::ImportedTableGet => wasmer_vm_imported_table_get as usize,
+            Self::TableSet => wasmer_vm_table_set as usize,
+            Self::ImportedTableSet => wasmer_vm_imported_table_set as usize,
+            Self::TableGrow => wasmer_vm_table_grow as usize,
+            Self::ImportedTableGrow => wasmer_vm_imported_table_grow as usize,
+            Self::FuncRef => wasmer_vm_func_ref as usize,
+            Self::ElemDrop => wasmer_vm_elem_drop as usize,
+            Self::Memory32Copy => wasmer_vm_memory32_copy as usize,
+            Self::ImportedMemory32Copy => wasmer_vm_imported_memory32_copy as usize,
+            Self::Memory32Fill => wasmer_vm_memory32_fill as usize,
+            Self::ImportedMemory32Fill => wasmer_vm_memory32_fill as usize,
+            Self::Memory32Init => wasmer_vm_memory32_init as usize,
+            Self::DataDrop => wasmer_vm_data_drop as usize,
+            Self::Probestack => wasmer_vm_probestack as usize,
+            Self::RaiseTrap => wasmer_vm_raise_trap as usize,
+        }
     }
-    result.unwrap()
+
+    /// Return the function name associated to the libcall.
+    pub fn to_function_name(&self) -> &str {
+        match self {
+            Self::CeilF32 => "wasmer_vm_f32_ceil",
+            Self::CeilF64 => "wasmer_vm_f64_ceil",
+            Self::FloorF32 => "wasmer_vm_f32_floor",
+            Self::FloorF64 => "wasmer_vm_f64_floor",
+            Self::NearestF32 => "wasmer_vm_f32_nearest",
+            Self::NearestF64 => "wasmer_vm_f64_nearest",
+            Self::TruncF32 => "wasmer_vm_f32_trunc",
+            Self::TruncF64 => "wasmer_vm_f64_trunc",
+            Self::Memory32Size => "wasmer_vm_memory32_size",
+            Self::ImportedMemory32Size => "wasmer_vm_imported_memory32_size",
+            Self::TableCopy => "wasmer_vm_table_copy",
+            Self::TableInit => "wasmer_vm_table_init",
+            Self::TableFill => "wasmer_vm_table_fill",
+            Self::TableSize => "wasmer_vm_table_size",
+            Self::ImportedTableSize => "wasmer_vm_imported_table_size",
+            Self::TableGet => "wasmer_vm_table_get",
+            Self::ImportedTableGet => "wasmer_vm_imported_table_get",
+            Self::TableSet => "wasmer_vm_table_set",
+            Self::ImportedTableSet => "wasmer_vm_imported_table_set",
+            Self::TableGrow => "wasmer_vm_table_grow",
+            Self::ImportedTableGrow => "wasmer_vm_imported_table_grow",
+            Self::FuncRef => "wasmer_vm_func_ref",
+            Self::ElemDrop => "wasmer_vm_elem_drop",
+            Self::Memory32Copy => "wasmer_vm_memory32_copy",
+            Self::ImportedMemory32Copy => "wasmer_vm_imported_memory32_copy",
+            Self::Memory32Fill => "wasmer_vm_memory32_fill",
+            Self::ImportedMemory32Fill => "wasmer_vm_imported_memory32_fill",
+            Self::Memory32Init => "wasmer_vm_memory32_init",
+            Self::DataDrop => "wasmer_vm_data_drop",
+            Self::RaiseTrap => "wasmer_vm_raise_trap",
+            // We have to do this because macOS requires a leading `_` and it's not
+            // a normal function, it's a static variable, so we have to do it manually.
+            #[cfg(target_vendor = "apple")]
+            Self::Probestack => "_wasmer_vm_probestack",
+            #[cfg(not(target_vendor = "apple"))]
+            Self::Probestack => "wasmer_vm_probestack",
+        }
+    }
 }
 
-/// Implementation of memory.wait64 for locally-defined 32-bit memories.
-///
-/// # Safety
-///
-/// `vmctx` must be dereferenceable.
-#[no_mangle]
-pub unsafe extern "C" fn wasmer_vm_memory32_atomic_wait64(
-    vmctx: *mut VMContext,
-    memory_index: u32,
-    dst: u32,
-    val: u64,
-    timeout: i64,
-) -> u32 {
-    let result = {
-        let instance = (*vmctx).instance_mut();
-        let memory_index = LocalMemoryIndex::from_u32(memory_index);
-
-        instance.local_memory_wait64(memory_index, dst, val, timeout)
-    };
-    if let Err(trap) = result {
-        raise_lib_trap(trap);
-    }
-    result.unwrap()
-}
-
-/// Implementation of memory.wait64 for imported 32-bit memories.
-///
-/// # Safety
-///
-/// `vmctx` must be dereferenceable.
-#[no_mangle]
-pub unsafe extern "C" fn wasmer_vm_imported_memory32_atomic_wait64(
-    vmctx: *mut VMContext,
-    memory_index: u32,
-    dst: u32,
-    val: u64,
-    timeout: i64,
-) -> u32 {
-    let result = {
-        let instance = (*vmctx).instance_mut();
-        let memory_index = MemoryIndex::from_u32(memory_index);
-
-        instance.imported_memory_wait64(memory_index, dst, val, timeout)
-    };
-    if let Err(trap) = result {
-        raise_lib_trap(trap);
-    }
-    result.unwrap()
-}
-
-/// Implementation of memory.notfy for locally-defined 32-bit memories.
-///
-/// # Safety
-///
-/// `vmctx` must be dereferenceable.
-#[no_mangle]
-pub unsafe extern "C" fn wasmer_vm_memory32_atomic_notify(
-    vmctx: *mut VMContext,
-    memory_index: u32,
-    dst: u32,
-    cnt: u32,
-) -> u32 {
-    let result = {
-        let instance = (*vmctx).instance_mut();
-        let memory_index = LocalMemoryIndex::from_u32(memory_index);
-
-        instance.local_memory_notify(memory_index, dst, cnt)
-    };
-    if let Err(trap) = result {
-        raise_lib_trap(trap);
-    }
-    result.unwrap()
-}
-
-/// Implementation of memory.notfy for imported 32-bit memories.
-///
-/// # Safety
-///
-/// `vmctx` must be dereferenceable.
-#[no_mangle]
-pub unsafe extern "C" fn wasmer_vm_imported_memory32_atomic_notify(
-    vmctx: *mut VMContext,
-    memory_index: u32,
-    dst: u32,
-    cnt: u32,
-) -> u32 {
-    let result = {
-        let instance = (*vmctx).instance_mut();
-        let memory_index = MemoryIndex::from_u32(memory_index);
-
-        instance.imported_memory_notify(memory_index, dst, cnt)
-    };
-    if let Err(trap) = result {
-        raise_lib_trap(trap);
-    }
-    result.unwrap()
-}
-
-/// The function pointer to a libcall
-pub fn function_pointer(libcall: LibCall) -> usize {
-    match libcall {
-        LibCall::CeilF32 => wasmer_vm_f32_ceil as usize,
-        LibCall::CeilF64 => wasmer_vm_f64_ceil as usize,
-        LibCall::FloorF32 => wasmer_vm_f32_floor as usize,
-        LibCall::FloorF64 => wasmer_vm_f64_floor as usize,
-        LibCall::NearestF32 => wasmer_vm_f32_nearest as usize,
-        LibCall::NearestF64 => wasmer_vm_f64_nearest as usize,
-        LibCall::TruncF32 => wasmer_vm_f32_trunc as usize,
-        LibCall::TruncF64 => wasmer_vm_f64_trunc as usize,
-        LibCall::Memory32Size => wasmer_vm_memory32_size as usize,
-        LibCall::ImportedMemory32Size => wasmer_vm_imported_memory32_size as usize,
-        LibCall::TableCopy => wasmer_vm_table_copy as usize,
-        LibCall::TableInit => wasmer_vm_table_init as usize,
-        LibCall::TableFill => wasmer_vm_table_fill as usize,
-        LibCall::TableSize => wasmer_vm_table_size as usize,
-        LibCall::ImportedTableSize => wasmer_vm_imported_table_size as usize,
-        LibCall::TableGet => wasmer_vm_table_get as usize,
-        LibCall::ImportedTableGet => wasmer_vm_imported_table_get as usize,
-        LibCall::TableSet => wasmer_vm_table_set as usize,
-        LibCall::ImportedTableSet => wasmer_vm_imported_table_set as usize,
-        LibCall::TableGrow => wasmer_vm_table_grow as usize,
-        LibCall::ImportedTableGrow => wasmer_vm_imported_table_grow as usize,
-        LibCall::FuncRef => wasmer_vm_func_ref as usize,
-        LibCall::ElemDrop => wasmer_vm_elem_drop as usize,
-        LibCall::Memory32Copy => wasmer_vm_memory32_copy as usize,
-        LibCall::ImportedMemory32Copy => wasmer_vm_imported_memory32_copy as usize,
-        LibCall::Memory32Fill => wasmer_vm_memory32_fill as usize,
-        LibCall::ImportedMemory32Fill => wasmer_vm_imported_memory32_fill as usize,
-        LibCall::Memory32Init => wasmer_vm_memory32_init as usize,
-        LibCall::DataDrop => wasmer_vm_data_drop as usize,
-        LibCall::Probestack => wasmer_vm_probestack as usize,
-        LibCall::RaiseTrap => wasmer_vm_raise_trap as usize,
-        LibCall::Memory32AtomicWait32 => wasmer_vm_memory32_atomic_wait32 as usize,
-        LibCall::ImportedMemory32AtomicWait32 => wasmer_vm_imported_memory32_atomic_wait32 as usize,
-        LibCall::Memory32AtomicWait64 => wasmer_vm_memory32_atomic_wait64 as usize,
-        LibCall::ImportedMemory32AtomicWait64 => wasmer_vm_imported_memory32_atomic_wait64 as usize,
-        LibCall::Memory32AtomicNotify => wasmer_vm_memory32_atomic_notify as usize,
-        LibCall::ImportedMemory32AtomicNotify => wasmer_vm_imported_memory32_atomic_notify as usize,
+impl fmt::Display for LibCall {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
     }
 }

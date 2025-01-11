@@ -13,7 +13,9 @@
 //!
 //! Ready?
 
-use wasmer::{imports, wat2wasm, Instance, Module, Store, TypedFunction};
+use wasmer::{imports, wat2wasm, Instance, Module, Store};
+use wasmer_compiler_cranelift::Cranelift;
+use wasmer_engine_universal::Universal;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Let's declare the Wasm module with the text representation.
@@ -37,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Note that we don't need to specify the engine/compiler if we want to use
     // the default provided by Wasmer.
     // You can use `Store::default()` for that.
-    let mut store = Store::default();
+    let store = Store::new(&Universal::new(Cranelift::default()).engine());
 
     println!("Compiling module...");
     // Let's compile the Wasm module.
@@ -48,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Instantiating module...");
     // Let's instantiate the Wasm module.
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
     // Here we go.
     //
@@ -57,14 +59,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // produce an error.
     //
     // Let's get it.
-    let div_by_zero: TypedFunction<(), i32> = instance
+    let div_by_zero = instance
         .exports
         .get_function("div_by_zero")?
-        .typed(&mut store)?;
+        .native::<(), i32>()?;
 
     println!("Calling `div_by_zero` function...");
     // Let's call the `div_by_zero` exported function.
-    let result = div_by_zero.call(&mut store);
+    let result = div_by_zero.call();
 
     // When we call a function it can either succeed or fail. We expect it to fail.
     match result {

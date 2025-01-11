@@ -1,7 +1,6 @@
 
 *
 *.o
-*.exe
 
 # Unignore files ending with `.c` (i.e. `wasm-c-api-wasi.c`)
 !*.c
@@ -9,5 +8,3 @@
 !Makefile
 !assets
 !assets/*
-!wasmer-capi-examples-runner
-!wasmer-capi-examples-runner/*

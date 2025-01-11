@@ -1,6 +1,5 @@
 use super::store::wasm_store_t;
-use super::types::{wasm_byte_vec_t, wasm_message_t};
-use super::types::{wasm_frame_t, wasm_frame_vec_t};
+use super::types::{wasm_byte_vec_t, wasm_frame_t, wasm_frame_vec_t, wasm_message_t};
 use std::ffi::CString;
 use wasmer_api::RuntimeError;
 
@@ -71,7 +70,7 @@ pub unsafe extern "C" fn wasm_trap_delete(_trap: Option<Box<wasm_trap_t>>) {}
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -145,12 +144,8 @@ pub unsafe extern "C" fn wasm_trap_trace(
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(target_os = "windows"))]
     use inline_c::assert_c;
-    #[cfg(target_os = "windows")]
-    use wasmer_inline_c::assert_c;
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_trap_message_null_terminated() {
         (assert_c! {
@@ -183,7 +178,6 @@ mod tests {
         .success();
     }
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_trap_message_not_null_terminated() {
         (assert_c! {

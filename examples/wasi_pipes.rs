@@ -11,9 +11,10 @@
 //!
 //! Ready?
 
-use std::io::{Read, Write};
-use wasmer::{Module, Store};
-use wasmer_wasix::{Pipe, WasiEnv};
+use wasmer::{Instance, Module, Store};
+use wasmer_compiler_cranelift::Cranelift;
+use wasmer_engine_universal::Universal;
+use wasmer_wasi::{Pipe, WasiState};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_path = concat!(
@@ -24,30 +25,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_bytes = std::fs::read(wasm_path)?;
 
     // Create a Store.
-    let mut store = Store::default();
+    // Note that we don't need to specify the engine/compiler if we want to use
+    // the default provided by Wasmer.
+    // You can use `Store::default()` for that.
+    let store = Store::new(&Universal::new(Cranelift::default()).engine());
 
     println!("Compiling module...");
     // Let's compile the Wasm module.
     let module = Module::new(&store, wasm_bytes)?;
 
+    println!("Creating `WasiEnv`...");
+    // First, we create the `WasiEnv` with the stdio pipes
+    let input = Pipe::new();
+    let output = Pipe::new();
+    let mut wasi_env = WasiState::new("hello")
+        .stdin(Box::new(input))
+        .stdout(Box::new(output))
+        .finalize()?;
+
+    println!("Instantiating module with WASI imports...");
+    // Then, we get the import object related to our WASI
+    // and attach it to the Wasm instance.
+    let import_object = wasi_env.import_object(&module)?;
+    let instance = Instance::new(&module, &import_object)?;
+
     let msg = "racecar go zoom";
     println!("Writing \"{}\" to the WASI stdin...", msg);
-    let (mut stdin_sender, stdin_reader) = Pipe::channel();
-    let (stdout_sender, mut stdout_reader) = Pipe::channel();
+    // To write to the stdin, we need a mutable reference to the pipe
+    //
+    // We access WasiState in a nested scope to ensure we're not holding
+    // the mutex after we need it.
+    {
+        let mut state = wasi_env.state();
+        let wasi_stdin = state.fs.stdin_mut()?.as_mut().unwrap();
+        // Then we can write to it!
+        writeln!(wasi_stdin, "{}", msg)?;
+    }
 
-    // To write to the stdin
-    writeln!(stdin_sender, "{}", msg)?;
+    println!("Call WASI `_start` function...");
+    // And we just call the `_start` function!
+    let start = instance.exports.get_function("_start")?;
+    start.call(&[])?;
 
-    println!("Running module...");
-    // First, we create the `WasiEnv` with the stdio pipes
-    WasiEnv::builder("hello")
-        .stdin(Box::new(stdin_reader))
-        .stdout(Box::new(stdout_sender))
-        .run_with_store(module, &mut store)?;
-
-    // To read from the stdout
+    println!("Reading from the WASI stdout...");
+    // To read from the stdout, we again need a mutable reference to the pipe
+    let mut state = wasi_env.state();
+    let wasi_stdout = state.fs.stdout_mut()?.as_mut().unwrap();
+    // Then we can read from it!
     let mut buf = String::new();
-    stdout_reader.read_to_string(&mut buf)?;
+    wasi_stdout.read_to_string(&mut buf)?;
     println!("Read \"{}\" from the WASI stdout!", buf.trim());
 
     Ok(())

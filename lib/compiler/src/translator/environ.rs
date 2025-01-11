@@ -1,15 +1,16 @@
 // This file contains code from external sources.
-// Attributions: https://github.com/wasmerio/wasmer/blob/main/docs/ATTRIBUTIONS.md
+// Attributions: https://github.com/wasmerio/wasmer/blob/master/ATTRIBUTIONS.md
 use super::state::ModuleTranslationState;
+use crate::lib::std::borrow::ToOwned;
 use crate::lib::std::string::ToString;
 use crate::lib::std::{boxed::Box, string::String, vec::Vec};
 use crate::translate_module;
-use crate::wasmparser::{Operator, ValType};
+use crate::wasmparser::{Operator, Range, Type};
+use crate::{WasmError, WasmResult};
 use std::convert::{TryFrom, TryInto};
-use std::ops::Range;
+use std::sync::Arc;
 use wasmer_types::entity::PrimaryMap;
 use wasmer_types::FunctionType;
-use wasmer_types::WasmResult;
 use wasmer_types::{
     CustomSectionIndex, DataIndex, DataInitializer, DataInitializerLocation, ElemIndex,
     ExportIndex, FunctionIndex, GlobalIndex, GlobalInit, GlobalType, ImportIndex,
@@ -33,7 +34,7 @@ pub trait FunctionBinaryReader<'a> {
     fn read_local_count(&mut self) -> WasmResult<u32>;
 
     /// Read a `(count, value_type)` declaration of local variables of the same type.
-    fn read_local_decl(&mut self) -> WasmResult<(u32, ValType)>;
+    fn read_local_decl(&mut self) -> WasmResult<(u32, Type)>;
 
     /// Reads the next available `Operator`.
     fn read_operator(&mut self) -> WasmResult<Operator<'a>>;
@@ -51,7 +52,7 @@ pub trait FunctionBinaryReader<'a> {
     fn eof(&self) -> bool;
 
     /// Return the range (original offset, original offset + data length)
-    fn range(&self) -> Range<usize>;
+    fn range(&self) -> Range;
 }
 
 /// The result of translating via `ModuleEnvironment`. Function bodies are not
@@ -85,11 +86,10 @@ impl<'data> ModuleEnvironment<'data> {
 
     /// Translate a wasm module using this environment. This consumes the
     /// `ModuleEnvironment` and produces a `ModuleInfoTranslation`.
-    pub fn translate(mut self, data: &'data [u8]) -> WasmResult<Self> {
+    pub fn translate(mut self, data: &'data [u8]) -> WasmResult<ModuleEnvironment<'data>> {
         assert!(self.module_translation_state.is_none());
         let module_translation_state = translate_module(data, &mut self)?;
         self.module_translation_state = Some(module_translation_state);
-
         Ok(self)
     }
 
@@ -109,8 +109,7 @@ impl<'data> ModuleEnvironment<'data> {
                 String::from(module),
                 String::from(field),
                 self.module.imports.len().try_into().unwrap(),
-            )
-                .into(),
+            ),
             import,
         );
         Ok(())
@@ -255,6 +254,11 @@ impl<'data> ModuleEnvironment<'data> {
     }
 
     pub(crate) fn declare_memory(&mut self, memory: MemoryType) -> WasmResult<()> {
+        if memory.shared {
+            return Err(WasmError::Unsupported(
+                "shared memories are not supported yet".to_owned(),
+            ));
+        }
         self.module.memories.push(memory);
         Ok(())
     }
@@ -404,7 +408,7 @@ impl<'data> ModuleEnvironment<'data> {
         data_index: DataIndex,
         data: &'data [u8],
     ) -> WasmResult<()> {
-        let old = self.module.passive_data.insert(data_index, Box::from(data));
+        let old = self.module.passive_data.insert(data_index, Arc::from(data));
         debug_assert!(
             old.is_none(),
             "a module can't have duplicate indices, this would be a wasmer-compiler bug"
@@ -447,7 +451,7 @@ impl<'data> ModuleEnvironment<'data> {
         self.module
             .custom_sections
             .insert(String::from(name), custom_section);
-        self.module.custom_sections_data.push(Box::from(data));
+        self.module.custom_sections_data.push(Arc::from(data));
         Ok(())
     }
 }

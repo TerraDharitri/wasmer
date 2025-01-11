@@ -10,12 +10,10 @@
 // Use the last_error API to retrieve error messages
 void print_wasmer_error() {
   int error_len = wasmer_last_error_length();
-  if (error_len > 0) {
-    printf("Error len: `%d`\n", error_len);
-    char *error_str = malloc(error_len);
-    wasmer_last_error_message(error_str, error_len);
-    printf("Error str: `%s`\n", error_str);
-  }
+  printf("Error len: `%d`\n", error_len);
+  char *error_str = malloc(error_len);
+  wasmer_last_error_message(error_str, error_len);
+  printf("Error str: `%s`\n", error_str);
 }
 
 void print_frame(wasm_frame_t* frame) {
@@ -45,7 +43,7 @@ int main(int argc, const char *argv[]) {
 
   // Load binary.
   printf("Loading binary...\n");
-  FILE *file = fopen("assets/call_trap.wasm", "rb");
+  FILE *file = fopen("assets/call_trap.wasm", "r");
   if (!file) {
     printf("> Error loading module!\n");
     return 1;

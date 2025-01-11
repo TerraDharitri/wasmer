@@ -1,5 +1,5 @@
 // This file contains code from external sources.
-// Attributions: https://github.com/wasmerio/wasmer/blob/main/docs/ATTRIBUTIONS.md
+// Attributions: https://github.com/wasmerio/wasmer/blob/master/ATTRIBUTIONS.md
 
 //! Densely numbered entity references as mapping keys.
 use crate::entity::boxed_slice::BoxedSlice;
@@ -12,9 +12,12 @@ use crate::lib::std::marker::PhantomData;
 use crate::lib::std::ops::{Index, IndexMut};
 use crate::lib::std::slice;
 use crate::lib::std::vec::Vec;
-use rkyv::{Archive, Archived, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use loupe::{MemoryUsage, MemoryUsageTracker};
+#[cfg(feature = "enable-rkyv")]
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 #[cfg(feature = "enable-serde")]
 use serde::{Deserialize, Serialize};
+use std::mem;
 
 /// A primary mapping `K -> V` allocating dense entity references.
 ///
@@ -33,29 +36,16 @@ use serde::{Deserialize, Serialize};
 /// `into_boxed_slice`.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
-#[derive(RkyvSerialize, RkyvDeserialize, Archive)]
+#[cfg_attr(
+    feature = "enable-rkyv",
+    derive(RkyvSerialize, RkyvDeserialize, Archive)
+)]
 pub struct PrimaryMap<K, V>
 where
     K: EntityRef,
 {
     pub(crate) elems: Vec<V>,
     pub(crate) unused: PhantomData<K>,
-}
-
-#[cfg(feature = "artifact-size")]
-impl<K, V> loupe::MemoryUsage for PrimaryMap<K, V>
-where
-    K: EntityRef,
-    V: loupe::MemoryUsage,
-{
-    fn size_of_val(&self, tracker: &mut dyn loupe::MemoryUsageTracker) -> usize {
-        std::mem::size_of_val(self)
-            + self
-                .elems
-                .iter()
-                .map(|value| value.size_of_val(tracker) - std::mem::size_of_val(value))
-                .sum::<usize>()
-    }
 }
 
 impl<K, V> PrimaryMap<K, V>
@@ -171,34 +161,12 @@ where
     }
 }
 
-impl<K, V> ArchivedPrimaryMap<K, V>
-where
-    K: EntityRef,
-    V: Archive,
-{
-    /// Get the element at `k` if it exists.
-    pub fn get(&self, k: K) -> Option<&V::Archived> {
-        self.elems.get(k.index())
-    }
-}
-
-impl<K, V> std::fmt::Debug for ArchivedPrimaryMap<K, V>
-where
-    K: EntityRef + std::fmt::Debug,
-    V: Archive,
-    V::Archived: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_map().entries(self.iter()).finish()
-    }
-}
-
 impl<K, V> Default for PrimaryMap<K, V>
 where
     K: EntityRef,
 {
-    fn default() -> Self {
-        Self::new()
+    fn default() -> PrimaryMap<K, V> {
+        PrimaryMap::new()
     }
 }
 
@@ -276,35 +244,18 @@ where
     }
 }
 
-impl<K, V> ArchivedPrimaryMap<K, V>
+impl<K, V> MemoryUsage for PrimaryMap<K, V>
 where
     K: EntityRef,
-    V: Archive,
-    V::Archived: std::fmt::Debug,
+    V: MemoryUsage,
 {
-    /// Iterator over all values in the `ArchivedPrimaryMap`
-    pub fn values(&self) -> slice::Iter<Archived<V>> {
-        self.elems.iter()
-    }
-
-    /// Iterate over all the keys and values in this map.
-    pub fn iter(&self) -> Iter<K, Archived<V>> {
-        Iter::new(self.elems.iter())
-    }
-}
-
-/// Immutable indexing into an `ArchivedPrimaryMap`.
-/// The indexed value must be in the map.
-impl<K, V> Index<K> for ArchivedPrimaryMap<K, V>
-where
-    K: EntityRef,
-    V: Archive,
-    V::Archived: std::fmt::Debug,
-{
-    type Output = Archived<V>;
-
-    fn index(&self, k: K) -> &Self::Output {
-        &self.elems[k.index()]
+    fn size_of_val(&self, tracker: &mut dyn MemoryUsageTracker) -> usize {
+        mem::size_of_val(self)
+            + self
+                .elems
+                .iter()
+                .map(|value| value.size_of_val(tracker) - mem::size_of_val(value))
+                .sum::<usize>()
     }
 }
 
@@ -318,7 +269,7 @@ mod tests {
 
     impl EntityRef for E {
         fn new(i: usize) -> Self {
-            Self(i as u32)
+            E(i as u32)
         }
         fn index(self) -> usize {
             self.0 as usize
@@ -413,8 +364,10 @@ mod tests {
         m.push(12);
         m.push(33);
 
-        for (i, key) in m.keys().enumerate() {
+        let mut i = 0;
+        for key in m.keys() {
             assert_eq!(key.index(), i);
+            i += 1;
         }
     }
 

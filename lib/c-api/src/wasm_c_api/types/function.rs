@@ -1,7 +1,6 @@
 use super::{wasm_externtype_t, wasm_valtype_vec_t, WasmExternType};
 use std::fmt;
-use wasmer_api::{ExternType, FunctionType};
-use wasmer_types::Type;
+use wasmer_api::{ExternType, FunctionType, ValType};
 
 pub(crate) struct WasmFunctionType {
     pub(crate) function_type: FunctionType,
@@ -58,7 +57,7 @@ impl wasm_functype_t {
 
     pub(crate) fn inner(&self) -> &WasmFunctionType {
         match &self.extern_type.inner {
-            WasmExternType::Function(wasm_function_type) => wasm_function_type,
+            WasmExternType::Function(wasm_function_type) => &wasm_function_type,
             _ => {
                 unreachable!("Data corruption: `wasm_functype_t` does not contain a function type")
             }
@@ -77,12 +76,12 @@ pub unsafe extern "C" fn wasm_functype_new(
     let params = params?;
     let results = results?;
 
-    let params_as_valtype: Vec<Type> = params
+    let params_as_valtype: Vec<ValType> = params
         .take()
         .into_iter()
         .map(|val| val.as_ref().unwrap().as_ref().into())
         .collect::<Vec<_>>();
-    let results_as_valtype: Vec<Type> = results
+    let results_as_valtype: Vec<ValType> = results
         .take()
         .into_iter()
         .map(|val| val.as_ref().unwrap().as_ref().into())

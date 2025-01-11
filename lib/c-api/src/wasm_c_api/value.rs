@@ -1,6 +1,7 @@
 use super::types::{wasm_ref_t, wasm_valkind_enum};
+use crate::error::update_last_error;
 use std::convert::{TryFrom, TryInto};
-use wasmer_api::Value;
+use wasmer_api::Val;
 
 /// Represents the kind of values. The variants of this C enum is
 /// defined in `wasm.h` to list the following:
@@ -9,7 +10,7 @@ use wasmer_api::Value;
 /// * `WASM_I64`, a 64-bit integer,
 /// * `WASM_F32`, a 32-bit float,
 /// * `WASM_F64`, a 64-bit float,
-/// * `WASM_EXTERNREF`, a WebAssembly reference,
+/// * `WASM_ANYREF`, a WebAssembly reference,
 /// * `WASM_FUNCREF`, a WebAssembly reference.
 #[allow(non_camel_case_types)]
 pub type wasm_valkind_t = u8;
@@ -42,7 +43,7 @@ pub union wasm_val_inner {
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -94,7 +95,7 @@ impl std::fmt::Debug for wasm_val_t {
             Ok(wasm_valkind_enum::WASM_F64) => {
                 ds.field("f64", &unsafe { self.of.float64_t });
             }
-            Ok(wasm_valkind_enum::WASM_EXTERNREF) => {
+            Ok(wasm_valkind_enum::WASM_ANYREF) => {
                 ds.field("anyref", &unsafe { self.of.wref });
             }
 
@@ -115,7 +116,7 @@ impl Clone for wasm_val_t {
     fn clone(&self) -> Self {
         wasm_val_t {
             kind: self.kind,
-            of: self.of,
+            of: self.of.clone(),
         }
     }
 }
@@ -136,8 +137,8 @@ pub unsafe extern "C" fn wasm_val_copy(
     val: &wasm_val_t,
 ) {
     out.kind = val.kind;
-    out.of = c_try!(val.kind.try_into().map(|kind| {
-        match kind {
+    out.of = match val.kind.try_into() {
+        Ok(kind) => match kind {
             wasm_valkind_enum::WASM_I32 => wasm_val_inner {
                 int32_t: val.of.int32_t,
             },
@@ -150,30 +151,23 @@ pub unsafe extern "C" fn wasm_val_copy(
             wasm_valkind_enum::WASM_F64 => wasm_val_inner {
                 float64_t: val.of.float64_t,
             },
-            wasm_valkind_enum::WASM_EXTERNREF => wasm_val_inner { wref: val.of.wref },
+            wasm_valkind_enum::WASM_ANYREF => wasm_val_inner { wref: val.of.wref },
             wasm_valkind_enum::WASM_FUNCREF => wasm_val_inner { wref: val.of.wref },
-        }
-    }); otherwise ());
-}
+        },
 
-impl Drop for wasm_val_t {
-    fn drop(&mut self) {
-        let kind: Result<wasm_valkind_enum, _> = self.kind.try_into();
-        match kind {
-            Ok(wasm_valkind_enum::WASM_EXTERNREF) | Ok(wasm_valkind_enum::WASM_FUNCREF) => unsafe {
-                if !self.of.wref.is_null() {
-                    drop(Box::from_raw(self.of.wref));
-                }
-            },
-            _ => {}
+        Err(e) => {
+            update_last_error(e);
+
+            return;
         }
-    }
+    };
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn wasm_val_delete(val: *mut wasm_val_t) {
-    if !val.is_null() {
-        std::ptr::drop_in_place(val);
+pub unsafe extern "C" fn wasm_val_delete(val: Option<Box<wasm_val_t>>) {
+    if let Some(val) = val {
+        // TODO: figure out where wasm_val is allocated first...
+        let _ = val;
     }
 }
 
@@ -186,14 +180,14 @@ impl TryFrom<wasm_valkind_t> for wasm_valkind_enum {
             1 => wasm_valkind_enum::WASM_I64,
             2 => wasm_valkind_enum::WASM_F32,
             3 => wasm_valkind_enum::WASM_F64,
-            128 => wasm_valkind_enum::WASM_EXTERNREF,
+            128 => wasm_valkind_enum::WASM_ANYREF,
             129 => wasm_valkind_enum::WASM_FUNCREF,
             _ => return Err("valkind value out of bounds"),
         })
     }
 }
 
-impl TryFrom<wasm_val_t> for Value {
+impl TryFrom<wasm_val_t> for Val {
     type Error = &'static str;
 
     fn try_from(item: wasm_val_t) -> Result<Self, Self::Error> {
@@ -201,54 +195,52 @@ impl TryFrom<wasm_val_t> for Value {
     }
 }
 
-impl TryFrom<&wasm_val_t> for Value {
+impl TryFrom<&wasm_val_t> for Val {
     type Error = &'static str;
 
     fn try_from(item: &wasm_val_t) -> Result<Self, Self::Error> {
         Ok(match item.kind.try_into()? {
-            wasm_valkind_enum::WASM_I32 => Value::I32(unsafe { item.of.int32_t }),
-            wasm_valkind_enum::WASM_I64 => Value::I64(unsafe { item.of.int64_t }),
-            wasm_valkind_enum::WASM_F32 => Value::F32(unsafe { item.of.float32_t }),
-            wasm_valkind_enum::WASM_F64 => Value::F64(unsafe { item.of.float64_t }),
-            wasm_valkind_enum::WASM_EXTERNREF => {
-                return Err("EXTERNREF not supported at this time")
-            }
+            wasm_valkind_enum::WASM_I32 => Val::I32(unsafe { item.of.int32_t }),
+            wasm_valkind_enum::WASM_I64 => Val::I64(unsafe { item.of.int64_t }),
+            wasm_valkind_enum::WASM_F32 => Val::F32(unsafe { item.of.float32_t }),
+            wasm_valkind_enum::WASM_F64 => Val::F64(unsafe { item.of.float64_t }),
+            wasm_valkind_enum::WASM_ANYREF => return Err("ANYREF not supported at this time"),
             wasm_valkind_enum::WASM_FUNCREF => return Err("FUNCREF not supported at this time"),
         })
     }
 }
 
-impl TryFrom<Value> for wasm_val_t {
+impl TryFrom<Val> for wasm_val_t {
     type Error = &'static str;
 
-    fn try_from(item: Value) -> Result<Self, Self::Error> {
+    fn try_from(item: Val) -> Result<Self, Self::Error> {
         wasm_val_t::try_from(&item)
     }
 }
 
-impl TryFrom<&Value> for wasm_val_t {
+impl TryFrom<&Val> for wasm_val_t {
     type Error = &'static str;
 
-    fn try_from(item: &Value) -> Result<Self, Self::Error> {
+    fn try_from(item: &Val) -> Result<Self, Self::Error> {
         Ok(match *item {
-            Value::I32(v) => wasm_val_t {
+            Val::I32(v) => wasm_val_t {
                 of: wasm_val_inner { int32_t: v },
                 kind: wasm_valkind_enum::WASM_I32 as _,
             },
-            Value::I64(v) => wasm_val_t {
+            Val::I64(v) => wasm_val_t {
                 of: wasm_val_inner { int64_t: v },
                 kind: wasm_valkind_enum::WASM_I64 as _,
             },
-            Value::F32(v) => wasm_val_t {
+            Val::F32(v) => wasm_val_t {
                 of: wasm_val_inner { float32_t: v },
                 kind: wasm_valkind_enum::WASM_F32 as _,
             },
-            Value::F64(v) => wasm_val_t {
+            Val::F64(v) => wasm_val_t {
                 of: wasm_val_inner { float64_t: v },
                 kind: wasm_valkind_enum::WASM_F64 as _,
             },
-            Value::V128(_) => return Err("128bit SIMD types not yet supported in Wasm C API"),
-            _ => todo!("Handle these values in TryFrom<Value> for wasm_val_t"),
+            Val::V128(_) => return Err("128bit SIMD types not yet supported in Wasm C API"),
+            _ => todo!("Handle these values in TryFrom<Val> for wasm_val_t"),
         })
     }
 }

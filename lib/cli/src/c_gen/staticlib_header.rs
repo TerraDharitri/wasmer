@@ -1,110 +1,104 @@
-//! Generate a header file for the static object file produced.
-
-use wasmer_compiler::types::symbols::{Symbol, SymbolRegistry};
-use wasmer_types::ModuleInfo;
+//! Generate a header file for the object file produced by the Staticlib engine.
 
 use super::{generate_c, CStatement, CType};
+use wasmer_compiler::{Symbol, SymbolRegistry};
+use wasmer_types::ModuleInfo;
 
-/// Helper functions to simplify the usage of the static artifact.
-fn gen_helper_functions(atom_name: &str, module_name: &str) -> String {
-    format!("
-    wasm_byte_vec_t generate_serialized_data_{atom_name}() {{
+/// Helper functions to simplify the usage of the Staticlib engine.
+const HELPER_FUNCTIONS: &str = r#"
+wasm_byte_vec_t generate_serialized_data() {
         // We need to pass all the bytes as one big buffer so we have to do all this logic to memcpy
         // the various pieces together from the generated header file.
         //
         // We should provide a `deseralize_vectored` function to avoid requiring this extra work.
 
-        char* byte_ptr = (char*)&{module_name}[0];
+        char* byte_ptr = (char*)&WASMER_METADATA[0];
 
         size_t num_function_pointers
-                = sizeof(function_pointers_{atom_name}) / sizeof(void*);
+                = sizeof(function_pointers) / sizeof(void*);
         size_t num_function_trampolines
-                = sizeof(function_trampolines_{atom_name}) / sizeof(void*);
+                = sizeof(function_trampolines) / sizeof(void*);
         size_t num_dynamic_function_trampoline_pointers
-                = sizeof(dynamic_function_trampoline_pointers_{atom_name}) / sizeof(void*);
+                = sizeof(dynamic_function_trampoline_pointers) / sizeof(void*);
 
 
-        size_t buffer_size = module_bytes_len_{atom_name}
-                + sizeof(size_t) + sizeof(function_pointers_{atom_name})
-                + sizeof(size_t) + sizeof(function_trampolines_{atom_name})
-                + sizeof(size_t) + sizeof(dynamic_function_trampoline_pointers_{atom_name});
+        size_t buffer_size = module_bytes_len
+                + sizeof(size_t) + sizeof(function_pointers)
+                + sizeof(size_t) + sizeof(function_trampolines)
+                + sizeof(size_t) + sizeof(dynamic_function_trampoline_pointers);
 
         char* memory_buffer = (char*) malloc(buffer_size);
         size_t current_offset = 0;
 
-        memcpy(memory_buffer + current_offset, byte_ptr, module_bytes_len_{atom_name});
-        current_offset += module_bytes_len_{atom_name};
+        memcpy(memory_buffer + current_offset, byte_ptr, module_bytes_len);
+        current_offset += module_bytes_len;
 
         memcpy(memory_buffer + current_offset, (void*)&num_function_pointers, sizeof(size_t));
         current_offset += sizeof(size_t);
 
-        memcpy(memory_buffer + current_offset, (void*)&function_pointers_{atom_name}[0], sizeof(function_pointers_{atom_name}));
-        current_offset += sizeof(function_pointers_{atom_name});
+        memcpy(memory_buffer + current_offset, (void*)&function_pointers[0], sizeof(function_pointers));
+        current_offset += sizeof(function_pointers);
 
         memcpy(memory_buffer + current_offset, (void*)&num_function_trampolines, sizeof(size_t));
         current_offset += sizeof(size_t);
 
-        memcpy(memory_buffer + current_offset, (void*)&function_trampolines_{atom_name}[0], sizeof(function_trampolines_{atom_name}));
-        current_offset += sizeof(function_trampolines_{atom_name});
+        memcpy(memory_buffer + current_offset, (void*)&function_trampolines[0], sizeof(function_trampolines));
+        current_offset += sizeof(function_trampolines);
 
         memcpy(memory_buffer + current_offset, (void*)&num_dynamic_function_trampoline_pointers, sizeof(size_t));
         current_offset += sizeof(size_t);
 
-        memcpy(memory_buffer + current_offset, (void*)&dynamic_function_trampoline_pointers_{atom_name}[0], sizeof(dynamic_function_trampoline_pointers_{atom_name}));
-        current_offset += sizeof(dynamic_function_trampoline_pointers_{atom_name});
+        memcpy(memory_buffer + current_offset, (void*)&dynamic_function_trampoline_pointers[0], sizeof(dynamic_function_trampoline_pointers));
+        current_offset += sizeof(dynamic_function_trampoline_pointers);
 
-        wasm_byte_vec_t module_byte_vec = {{
+        wasm_byte_vec_t module_byte_vec = {
                 .size = buffer_size,
                 .data = memory_buffer,
-        }};
+        };
         return module_byte_vec;
-    }}
-
-    wasm_module_t* wasmer_object_module_new_{atom_name}(wasm_store_t* store, const char* wasm_name) {{
-            // wasm_name intentionally unused for now: will be used in the future.
-            wasm_byte_vec_t module_byte_vec = generate_serialized_data_{atom_name}();
-            wasm_module_t* module = wasm_module_deserialize(store, &module_byte_vec);
-            free(module_byte_vec.data);
-
-            return module;
-    }}
-    ")
 }
+
+wasm_module_t* wasmer_staticlib_engine_new(wasm_store_t* store, const char* wasm_name) {
+        // wasm_name intentionally unused for now: will be used in the future.
+        wasm_byte_vec_t module_byte_vec = generate_serialized_data();
+        wasm_module_t* module = wasm_module_deserialize(store, &module_byte_vec);
+        free(module_byte_vec.data);
+
+        return module;
+}
+"#;
 
 /// Generate the header file that goes with the generated object file.
 pub fn generate_header_file(
-    atom_name: &str,
     module_info: &ModuleInfo,
     symbol_registry: &dyn SymbolRegistry,
     metadata_length: usize,
 ) -> String {
-    let mut c_statements = vec![
-        CStatement::LiteralConstant {
-            value: "#include \"wasmer.h\"\n#include <stdlib.h>\n#include <string.h>\n\n"
-                .to_string(),
+    let mut c_statements = vec![];
+    c_statements.push(CStatement::LiteralConstant {
+        value: "#include <stdlib.h>\n#include <string.h>\n\n".to_string(),
+    });
+    c_statements.push(CStatement::LiteralConstant {
+        value: "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n".to_string(),
+    });
+    c_statements.push(CStatement::Declaration {
+        name: "module_bytes_len".to_string(),
+        is_extern: false,
+        is_const: true,
+        ctype: CType::U32,
+        definition: Some(Box::new(CStatement::LiteralConstant {
+            value: metadata_length.to_string(),
+        })),
+    });
+    c_statements.push(CStatement::Declaration {
+        name: "WASMER_METADATA".to_string(),
+        is_extern: true,
+        is_const: true,
+        ctype: CType::Array {
+            inner: Box::new(CType::U8),
         },
-        CStatement::LiteralConstant {
-            value: "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n".to_string(),
-        },
-        CStatement::Declaration {
-            name: format!("module_bytes_len_{atom_name}"),
-            is_extern: false,
-            is_const: true,
-            ctype: CType::U32,
-            definition: Some(Box::new(CStatement::LiteralConstant {
-                value: metadata_length.to_string(),
-            })),
-        },
-        CStatement::Declaration {
-            name: symbol_registry.symbol_to_name(Symbol::Metadata),
-            is_extern: true,
-            is_const: true,
-            ctype: CType::Array {
-                inner: Box::new(CType::U8),
-            },
-            definition: None,
-        },
-    ];
+        definition: None,
+    });
     let function_declarations = module_info
         .functions
         .iter()
@@ -117,7 +111,7 @@ pub fn generate_header_file(
             // TODO: figure out the signature here too
             CStatement::Declaration {
                 name: function_name,
-                is_extern: true,
+                is_extern: false,
                 is_const: false,
                 ctype: CType::Function {
                     arguments: vec![CType::Void],
@@ -158,7 +152,7 @@ pub fn generate_header_file(
             .collect::<Vec<_>>();
 
         c_statements.push(CStatement::Declaration {
-            name: format!("function_pointers_{atom_name}"),
+            name: "function_pointers".to_string(),
             is_extern: false,
             is_const: true,
             ctype: CType::Array {
@@ -180,7 +174,7 @@ pub fn generate_header_file(
 
                 CStatement::Declaration {
                     name: function_name,
-                    is_extern: true,
+                    is_extern: false,
                     is_const: false,
                     ctype: CType::Function {
                         arguments: vec![CType::void_ptr(), CType::void_ptr(), CType::void_ptr()],
@@ -214,7 +208,7 @@ pub fn generate_header_file(
             .collect::<Vec<_>>();
 
         c_statements.push(CStatement::Declaration {
-            name: format!("function_trampolines_{atom_name}"),
+            name: "function_trampolines".to_string(),
             is_extern: false,
             is_const: true,
             ctype: CType::Array {
@@ -236,7 +230,7 @@ pub fn generate_header_file(
             // TODO: figure out the signature here
             CStatement::Declaration {
                 name: function_name,
-                is_extern: true,
+                is_extern: false,
                 is_const: false,
                 ctype: CType::Function {
                     arguments: vec![CType::void_ptr(), CType::void_ptr(), CType::void_ptr()],
@@ -278,7 +272,7 @@ pub fn generate_header_file(
             })
             .collect::<Vec<_>>();
         c_statements.push(CStatement::Declaration {
-            name: format!("dynamic_function_trampoline_pointers_{atom_name}"),
+            name: "dynamic_function_trampoline_pointers".to_string(),
             is_extern: false,
             is_const: true,
             ctype: CType::Array {
@@ -291,7 +285,7 @@ pub fn generate_header_file(
     }
 
     c_statements.push(CStatement::LiteralConstant {
-        value: gen_helper_functions(atom_name, &symbol_registry.symbol_to_name(Symbol::Metadata)),
+        value: HELPER_FUNCTIONS.to_string(),
     });
 
     c_statements.push(CStatement::LiteralConstant {

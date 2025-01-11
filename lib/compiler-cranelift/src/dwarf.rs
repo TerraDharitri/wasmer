@@ -1,11 +1,9 @@
 use gimli::write::{Address, EndianVec, Result, Writer};
 use gimli::{RunTimeEndian, SectionId};
-use wasmer_compiler::types::{
-    relocation::{Relocation, RelocationKind, RelocationTarget},
-    section::{CustomSection, CustomSectionProtection, SectionBody},
-    target::Endianness,
-};
-use wasmer_types::{entity::EntityRef, LocalFunctionIndex};
+use wasmer_compiler::{CustomSection, CustomSectionProtection, SectionBody};
+use wasmer_compiler::{Endianness, Relocation, RelocationKind, RelocationTarget};
+use wasmer_types::entity::EntityRef;
+use wasmer_types::LocalFunctionIndex;
 
 #[derive(Clone, Debug)]
 pub struct WriterRelocate {
@@ -22,7 +20,7 @@ impl WriterRelocate {
             // We autodetect it, based on the host
             None => RunTimeEndian::default(),
         };
-        Self {
+        WriterRelocate {
             relocs: Vec::new(),
             writer: EndianVec::new(endianness),
         }
@@ -80,7 +78,7 @@ impl Writer for WriterRelocate {
                         offset,
                         addend,
                     });
-                    self.write_udata(addend as _, size)
+                    self.write_udata(addend as u64, size)
                 } else {
                     unreachable!("Symbol {} in DWARF not recognized", symbol);
                 }

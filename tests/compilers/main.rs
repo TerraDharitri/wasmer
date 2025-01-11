@@ -12,14 +12,13 @@ mod issues;
 mod metering;
 mod middlewares;
 // mod multi_value_imports;
-mod artifact;
+mod native_functions;
 mod serialize;
 mod traps;
-mod typed_functions;
 mod wasi;
 mod wast;
 
-pub use crate::config::{Compiler, Config};
+pub use crate::config::{Compiler, Config, Engine};
 pub use crate::wasi::run_wasi;
 pub use crate::wast::run_wast;
 pub use wasmer_wast::WasiFileSystemKind;

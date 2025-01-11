@@ -1,8 +1,8 @@
 use lazy_static::lazy_static;
 use std::os::raw::c_char;
 
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
-const VERSION_PRE: &str = concat!(env!("CARGO_PKG_VERSION_PRE"), "\0");
+const VERSION: &'static str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+const VERSION_PRE: &'static str = concat!(env!("CARGO_PKG_VERSION_PRE"), "\0");
 
 lazy_static! {
     static ref VERSION_MAJOR: u8 = env!("CARGO_PKG_VERSION_MAJOR")
@@ -40,7 +40,7 @@ pub unsafe extern "C" fn wasmer_version() -> *const c_char {
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -98,7 +98,7 @@ pub unsafe extern "C" fn wasmer_version_patch() -> u8 {
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"

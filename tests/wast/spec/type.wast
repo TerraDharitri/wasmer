@@ -42,7 +42,7 @@
 
 (assert_malformed
   (module quote "(type (func (result i32) (param i32)))")
-  "unexpected token"
+  "result before parameter"
 )
 (assert_malformed
   (module quote "(type (func (result $x i32)))")

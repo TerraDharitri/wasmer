@@ -1,13 +1,11 @@
 [package]
 name = "wasmer-derive"
+version = "2.2.1"
 description = "Wasmer derive macros"
-authors.workspace = true
-edition.workspace = true
-homepage.workspace = true
-license.workspace = true
-repository.workspace = true
-rust-version.workspace = true
-version.workspace = true
+authors = ["Wasmer Engineering Team <engineering@wasmer.io>"]
+repository = "https://github.com/wasmerio/wasmer"
+license = "MIT"
+edition = "2018"
 
 [lib]
 proc-macro = true
@@ -16,10 +14,8 @@ proc-macro = true
 syn = { version = "1.0.72", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = "1"
-proc-macro-error2 = "2.0.1"
+proc-macro-error = "1.0.0"
 
 [dev-dependencies]
-wasmer-types = { path = "../types", default-features = false, features = [
-	"std",
-] }
+wasmer = { path = "../api" }
 compiletest_rs = "0.6"

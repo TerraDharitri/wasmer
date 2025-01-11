@@ -3,24 +3,27 @@
 
 #![deny(missing_docs, trivial_numeric_casts, unused_extern_crates)]
 #![warn(unused_import_braces)]
-#![allow(clippy::new_without_default)]
-#![warn(
-    clippy::float_arithmetic,
-    clippy::mut_mut,
-    clippy::nonminimal_bool,
-    clippy::map_unwrap_or,
-    clippy::print_stdout,
-    clippy::unicode_not_nfc,
-    clippy::use_self
+#![cfg_attr(feature = "std", deny(unstable_features))]
+#![cfg_attr(feature = "cargo-clippy", allow(clippy::new_without_default))]
+#![cfg_attr(
+    feature = "cargo-clippy",
+    warn(
+        clippy::float_arithmetic,
+        clippy::mut_mut,
+        clippy::nonminimal_bool,
+        clippy::option_map_unwrap_or,
+        clippy::option_map_unwrap_or_else,
+        clippy::print_stdout,
+        clippy::unicode_not_nfc,
+        clippy::use_self
+    )
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod cache;
 mod filesystem;
 mod hash;
 
 pub use crate::cache::Cache;
-#[cfg(feature = "filesystem")]
 pub use crate::filesystem::FileSystemCache;
 pub use crate::hash::Hash;
 

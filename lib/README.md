@@ -22,8 +22,11 @@ composed of a set of crates. We can group them as follows:
     performance.
 * `derive` — A set of procedural macros used inside Wasmer,
 * ABI:
+  * `emscripten` — Emscripten ABI implementation inside Wasmer,
   * `wasi` — WASI ABI implementation inside Wasmer:
     * `wasi-types` — All the WASI types,
+    * `wasi-experimental-io-devices` — An experimental extension of
+      WASI for basic graphics.
 * `engine` — The general abstraction for creating an engine, which is
   responsible of leading the compiling and running flow. Using the
   same compiler, the runtime performance will be approximately the
@@ -31,6 +34,14 @@ composed of a set of crates. We can group them as follows:
   differ:
   * `engine-universal` — stores the code in a custom file format, and
     loads it in memory,
+  * `engine-dylib` — stores Position-Independent Code in a native
+    shared object library (`.dylib`, `.so`, `.dll`) and loads it with
+    Operating System shared library loader (via `dlopen`),
+  * `engine-staticlib` — stores executable code in a native static
+    object library, in addition to emitting a C header file, which
+    both can be linked against a sandboxed WebAssembly runtime
+    environment for the compiled module with no need for runtime
+    compilation,
   * `object` — A library to cross-generate native objects for various
     platforms.
 * `middlewares` — A collection of middlewares, like `metering` that

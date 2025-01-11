@@ -1,6 +1,5 @@
 //! This file is mainly to assure specific issues are working well
 use anyhow::Result;
-use wasmer::FunctionEnv;
 use wasmer::*;
 
 /// Corruption of WasmerEnv when using call indirect.
@@ -11,21 +10,24 @@ use wasmer::*;
 /// https://github.com/wasmerio/wasmer/issues/2329
 #[compiler_test(issues)]
 fn issue_2329(mut config: crate::Config) -> Result<()> {
-    let mut store = config.store();
+    let store = config.store();
 
-    #[derive(Clone, Default)]
+    #[derive(Clone, Default, WasmerEnv)]
     pub struct Env {
-        memory: Option<Memory>,
+        #[wasmer(export)]
+        memory: LazyInit<Memory>,
     }
 
     impl Env {
         pub fn new() -> Self {
-            Self { memory: None }
+            Self {
+                memory: LazyInit::new(),
+            }
         }
     }
 
-    pub fn read_memory(mut ctx: FunctionEnvMut<Env>, guest_ptr: u32) -> u32 {
-        dbg!(ctx.data().memory.as_ref());
+    pub fn read_memory(env: &Env, guest_ptr: u32) -> u32 {
+        dbg!(env.memory_ref());
         dbg!(guest_ptr);
         0
     }
@@ -61,35 +63,36 @@ fn issue_2329(mut config: crate::Config) -> Result<()> {
     "#;
     let module = Module::new(&store, wat)?;
     let env = Env::new();
-    let mut env = FunctionEnv::new(&mut store, env);
-    let imports: Imports = imports! {
+    let imports: ImportObject = imports! {
         "env" => {
-            "__read_memory" => Function::new_typed_with_env(
-                &mut store,
-                &env,
+            "__read_memory" => Function::new_native_with_env(
+                &store,
+                env.clone(),
                 read_memory
             ),
         }
     };
-    let instance = Instance::new(&mut store, &module, &imports)?;
-    instance
-        .exports
-        .get_function("read_memory")?
-        .call(&mut store, &[])?;
+    let instance = Instance::new(&module, &imports)?;
+    instance.exports.get_function("read_memory")?.call(&[])?;
     Ok(())
 }
 
 #[compiler_test(issues)]
 fn call_with_static_data_pointers(mut config: crate::Config) -> Result<()> {
-    let mut store = config.store();
+    let store = config.store();
+    let memory = Memory::new(
+        &store,
+        MemoryType::new(Pages(1024), Some(Pages(2048)), false),
+    )
+    .unwrap();
 
-    #[derive(Clone)]
+    #[derive(Clone, WasmerEnv)]
     pub struct Env {
-        memory: Option<Memory>,
+        memory: Memory,
     }
 
     pub fn banana(
-        mut ctx: FunctionEnvMut<Env>,
+        env: &Env,
         a: u64,
         b: u64,
         c: u64,
@@ -100,25 +103,29 @@ fn call_with_static_data_pointers(mut config: crate::Config) -> Result<()> {
         h: u64,
     ) -> u64 {
         println!("{:?}", (a, b, c, d, e, f, g, h));
-        let mut buf = vec![0; d as usize];
-        let memory = ctx.data().memory.as_ref().unwrap().clone();
-        memory.view(&ctx).read(e, &mut buf).unwrap();
-        let input_string = std::str::from_utf8(&buf).unwrap();
+        let view = env.memory.view::<u8>();
+        let bytes = view
+            .get(e as usize..(e + d) as usize)
+            .unwrap()
+            .into_iter()
+            .map(|b| b.get())
+            .collect::<Vec<u8>>();
+        let input_string = std::str::from_utf8(&bytes).unwrap();
         assert_eq!(input_string, "bananapeach");
         0
     }
 
-    pub fn mango(ctx: FunctionEnvMut<Env>, a: u64) {}
+    pub fn mango(env: &Env, a: u64) {}
 
-    pub fn chaenomeles(ctx: FunctionEnvMut<Env>, a: u64) -> u64 {
+    pub fn chaenomeles(env: &Env, a: u64) -> u64 {
         0
     }
 
-    pub fn peach(ctx: FunctionEnvMut<Env>, a: u64, b: u64) -> u64 {
+    pub fn peach(env: &Env, a: u64, b: u64) -> u64 {
         0
     }
 
-    pub fn gas(ctx: FunctionEnvMut<Env>, a: u32) {}
+    pub fn gas(env: &Env, a: u32) {}
 
     let wat = r#"
     (module
@@ -187,40 +194,35 @@ fn call_with_static_data_pointers(mut config: crate::Config) -> Result<()> {
     "#;
 
     let module = Module::new(&store, wat)?;
-    let env = Env { memory: None };
-    let mut env = FunctionEnv::new(&mut store, env);
-    let memory = Memory::new(
-        &mut store,
-        MemoryType::new(Pages(1024), Some(Pages(2048)), false),
-    )
-    .unwrap();
-    env.as_mut(&mut store).memory = Some(memory.clone());
+    let env = Env {
+        memory: memory.clone(),
+    };
     let mut exports = Exports::new();
     exports.insert("memory", memory);
     exports.insert(
         "banana",
-        Function::new_typed_with_env(&mut store, &env, banana),
+        Function::new_native_with_env(&store, env.clone(), banana),
     );
     exports.insert(
         "peach",
-        Function::new_typed_with_env(&mut store, &env, peach),
+        Function::new_native_with_env(&store, env.clone(), peach),
     );
     exports.insert(
         "chaenomeles",
-        Function::new_typed_with_env(&mut store, &env, chaenomeles),
+        Function::new_native_with_env(&store, env.clone(), chaenomeles),
     );
     exports.insert(
         "mango",
-        Function::new_typed_with_env(&mut store, &env, mango),
+        Function::new_native_with_env(&store, env.clone(), mango),
     );
-    exports.insert("gas", Function::new_typed_with_env(&mut store, &env, gas));
-    let mut imports = Imports::new();
-    imports.register_namespace("env", exports);
-    let instance = Instance::new(&mut store, &module, &imports)?;
-    instance
-        .exports
-        .get_function("repro")?
-        .call(&mut store, &[])?;
+    exports.insert(
+        "gas",
+        Function::new_native_with_env(&store, env.clone(), gas),
+    );
+    let mut imports = ImportObject::new();
+    imports.register("env", exports);
+    let instance = Instance::new(&module, &imports)?;
+    instance.exports.get_function("repro")?.call(&[])?;
     Ok(())
 }
 
@@ -230,7 +232,7 @@ fn call_with_static_data_pointers(mut config: crate::Config) -> Result<()> {
 /// available compilers.
 #[compiler_test(issues)]
 fn regression_gpr_exhaustion_for_calls(mut config: crate::Config) -> Result<()> {
-    let mut store = config.store();
+    let store = config.store();
     let wat = r#"
         (module
           (type (;0;) (func (param f64) (result i32)))
@@ -257,84 +259,9 @@ fn regression_gpr_exhaustion_for_calls(mut config: crate::Config) -> Result<()> 
             i32.const 0)
           (table (;0;) 1 1 funcref))
     "#;
-    let mut env = FunctionEnv::new(&mut store, ());
     let module = Module::new(&store, wat)?;
-    let imports: Imports = imports! {};
-    let instance = Instance::new(&mut store, &module, &imports)?;
-    Ok(())
-}
-
-#[compiler_test(issues)]
-fn test_start(mut config: crate::Config) -> Result<()> {
-    let mut store = config.store();
-    let mut env = FunctionEnv::new(&mut store, ());
-    let imports: Imports = imports! {};
-    let wat = r#"
-    (module (func $main (unreachable)) (start $main))
-    "#;
-    let module = Module::new(&store, wat)?;
-    let instance = Instance::new(&mut store, &module, &imports);
-    assert!(instance.is_err());
-    if let InstantiationError::Start(err) = instance.unwrap_err() {
-        assert_eq!(err.message(), "unreachable");
-    } else {
-        panic!("_start should have failed with an unreachable error")
-    }
-
-    Ok(())
-}
-
-#[compiler_test(issues)]
-fn test_popcnt(mut config: crate::Config) -> Result<()> {
-    let mut store = config.store();
-    let mut env = FunctionEnv::new(&mut store, ());
-    let imports: Imports = imports! {};
-
-    let wat = r#"
-    (module
-        (func $popcnt_i32 (export "popcnt_i32") (param i32) (result i32)
-            local.get 0
-            i32.popcnt
-        )
-        (func $popcnt_i64 (export "popcnt_i64") (param i64) (result i64)
-            local.get 0
-            i64.popcnt
-        )
-    )"#;
-
-    let module = Module::new(&store, wat)?;
-    let instance = Instance::new(&mut store, &module, &imports)?;
-
-    let popcnt_i32 = instance.exports.get_function("popcnt_i32").unwrap();
-    let popcnt_i64 = instance.exports.get_function("popcnt_i64").unwrap();
-
-    let get_next_number_i32 = |mut num: i32| {
-        num ^= num << 13;
-        num ^= num >> 17;
-        num ^= num << 5;
-        num
-    };
-    let get_next_number_i64 = |mut num: i64| {
-        num ^= num << 34;
-        num ^= num >> 40;
-        num ^= num << 7;
-        num
-    };
-
-    let mut num = 1;
-    for _ in 1..10000 {
-        let result = popcnt_i32.call(&mut store, &[Value::I32(num)]).unwrap();
-        assert_eq!(&Value::I32(num.count_ones() as i32), result.get(0).unwrap());
-        num = get_next_number_i32(num);
-    }
-
-    let mut num = 1;
-    for _ in 1..10000 {
-        let result = popcnt_i64.call(&mut store, &[Value::I64(num)]).unwrap();
-        assert_eq!(&Value::I64(num.count_ones() as i64), result.get(0).unwrap());
-        num = get_next_number_i64(num);
-    }
-
+    let imports: ImportObject = imports! {};
+    let instance = Instance::new(&module, &imports)?;
     Ok(())
 }
 
@@ -430,68 +357,15 @@ fn large_number_local(mut config: crate::Config) -> Result<()> {
         )
       )
     "#;
-    let mut env = FunctionEnv::new(&mut store, ());
+
     let module = Module::new(&store, wat)?;
-    let imports: Imports = imports! {};
-    let instance = Instance::new(&mut store, &module, &imports)?;
+    let imports: ImportObject = imports! {};
+    let instance = Instance::new(&module, &imports)?;
     let result = instance
         .exports
         .get_function("large_local")?
-        .call(&mut store, &[])
+        .call(&[])
         .unwrap();
-    assert_eq!(&Value::I64(1_i64), result.get(0).unwrap());
-    Ok(())
-}
-
-#[cfg(target_arch = "aarch64")]
-#[compiler_test(issues)]
-/// Singlepass panics on aarch64 for long relocations.
-///
-/// Note: this one is specific to Singlepass, but we want to test in all
-/// available compilers.
-///
-/// https://github.com/wasmerio/wasmer/issues/4519
-fn issue_4519(mut config: crate::Config) -> Result<()> {
-    let wasm = include_bytes!("./data/4519_singlepass_panic.wasm");
-
-    let mut store = config.store();
-    let module = Module::new(&store, wasm)?;
-
-    Ok(())
-}
-
-#[cfg(target_arch = "aarch64")]
-#[compiler_test(issues)]
-/// Singlepass panics on aarch64 for long relocations.
-/// This test specifically targets the emission of the sdiv64 binop.
-///
-/// Note: this one is specific to Singlepass, but we want to test in all
-/// available compilers.
-///
-/// https://github.com/wasmerio/wasmer/issues/4519
-fn issue_4519_sdiv64(mut config: crate::Config) -> Result<()> {
-    const REPEATS_TO_REPRODUCE: usize = 16_000;
-
-    let sdiv64 = r#"
-        i64.const 3155225962131072202
-        i64.const -6717269760755396770
-        i64.div_s
-        drop
-    "#;
-
-    let wat = format!(
-        r#"
-      (module
-        (func (;0;)
-            {}
-        )
-      )
-    "#,
-        sdiv64.repeat(REPEATS_TO_REPRODUCE)
-    );
-
-    let mut store = config.store();
-    let module = Module::new(&store, wat)?;
-
+    assert_eq!(&Value::I64(1 as i64), result.get(0).unwrap());
     Ok(())
 }

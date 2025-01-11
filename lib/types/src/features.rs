@@ -1,3 +1,5 @@
+use loupe::MemoryUsage;
+#[cfg(feature = "enable-rkyv")]
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 #[cfg(feature = "enable-serde")]
 use serde::{Deserialize, Serialize};
@@ -6,11 +8,12 @@ use serde::{Deserialize, Serialize};
 /// Features usually have a corresponding [WebAssembly proposal].
 ///
 /// [WebAssembly proposal]: https://github.com/WebAssembly/proposals
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, MemoryUsage)]
 #[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "artifact-size", derive(loupe::MemoryUsage))]
-#[derive(RkyvSerialize, RkyvDeserialize, Archive)]
-#[rkyv(derive(Debug), compare(PartialEq))]
+#[cfg_attr(
+    feature = "enable-rkyv",
+    derive(RkyvSerialize, RkyvDeserialize, Archive)
+)]
 pub struct Features {
     /// Threads proposal should be enabled
     pub threads: bool,
@@ -32,17 +35,13 @@ pub struct Features {
     pub memory64: bool,
     /// Wasm exceptions proposal should be enabled
     pub exceptions: bool,
-    /// Relaxed SIMD proposal should be enabled
-    pub relaxed_simd: bool,
-    /// Extended constant expressions proposal should be enabled
-    pub extended_const: bool,
 }
 
 impl Features {
     /// Create a new feature
     pub fn new() -> Self {
         Self {
-            threads: true,
+            threads: false,
             // Reference types should be on by default
             reference_types: true,
             // SIMD should be on by default
@@ -56,8 +55,6 @@ impl Features {
             multi_memory: false,
             memory64: false,
             exceptions: false,
-            relaxed_simd: false,
-            extended_const: false,
         }
     }
 
@@ -250,7 +247,7 @@ mod test_features {
         assert_eq!(
             default,
             Features {
-                threads: true,
+                threads: false,
                 reference_types: true,
                 simd: true,
                 bulk_memory: true,
@@ -260,8 +257,6 @@ mod test_features {
                 multi_memory: false,
                 memory64: false,
                 exceptions: false,
-                relaxed_simd: false,
-                extended_const: false,
             }
         );
     }

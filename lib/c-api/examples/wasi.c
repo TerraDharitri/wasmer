@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,33 +12,21 @@
 void print_wasmer_error()
 {
     int error_len = wasmer_last_error_length();
-    if (error_len > 0) {
-      printf("Error len: `%d`\n", error_len);
-      char *error_str = malloc(error_len);
-      wasmer_last_error_message(error_str, error_len);
-      printf("Error str: `%s`\n", error_str);
-    }
+    printf("Error len: `%d`\n", error_len);
+    char *error_str = malloc(error_len);
+    wasmer_last_error_message(error_str, error_len);
+    printf("Error str: `%s`\n", error_str);
 }
 
 int main(int argc, const char* argv[]) {
-  #ifdef WASMER_WASI_ENABLED // If WASI is enabled
-
   // Initialize.
   printf("Initializing...\n");
   wasm_engine_t* engine = wasm_engine_new();
   wasm_store_t* store = wasm_store_new(engine);
 
-  printf("Setting up WASI...\n");
-  wasi_config_t* config = wasi_config_new("example_program");
-  // TODO: error checking
-  const char* js_string = "function greet(name) { return JSON.stringify('Hello, ' + name); }; print(greet('World'));";
-  wasi_config_arg(config, "--eval");
-  wasi_config_arg(config, js_string);
-  wasi_config_capture_stdout(config);
-
   // Load binary.
   printf("Loading binary...\n");
-  FILE* file = fopen("assets/qjs.wasm", "rb");
+  FILE* file = fopen("assets/qjs.wasm", "r");
   if (!file) {
     printf("> Error loading module!\n");
     return 1;
@@ -50,7 +37,7 @@ int main(int argc, const char* argv[]) {
   wasm_byte_vec_t binary;
   wasm_byte_vec_new_uninitialized(&binary, file_size);
   if (fread(binary.data, file_size, 1, file) != 1) {
-    printf("> Error initializing module!\n");
+    printf("> Error loading module!\n");
     return 1;
   }
   fclose(file);
@@ -65,8 +52,15 @@ int main(int argc, const char* argv[]) {
 
   wasm_byte_vec_delete(&binary);
 
-  wasi_env_t* wasi_env = wasi_env_new(store, config);
+  printf("Setting up WASI...\n");
+  wasi_config_t* config = wasi_config_new("example_program");
+  // TODO: error checking
+  const char* js_string = "function greet(name) { return JSON.stringify('Hello, ' + name); }; print(greet('World'));";
+  wasi_config_arg(config, "--eval");
+  wasi_config_arg(config, js_string);
+  wasi_config_capture_stdout(config);
 
+  wasi_env_t* wasi_env = wasi_env_new(config);
   if (!wasi_env) {
     printf("> Error building WASI env!\n");
     print_wasmer_error();
@@ -76,7 +70,7 @@ int main(int argc, const char* argv[]) {
   // Instantiate.
   printf("Instantiating module...\n");
   wasm_extern_vec_t imports;
-  bool get_imports_result = wasi_get_imports(store, wasi_env,module,&imports);
+  bool get_imports_result = wasi_get_imports(store, module, wasi_env, &imports);
 
   if (!get_imports_result) {
     printf("> Error getting WASI imports!\n");
@@ -89,12 +83,6 @@ int main(int argc, const char* argv[]) {
 
   if (!instance) {
     printf("> Error instantiating module!\n");
-    print_wasmer_error();
-    return 1;
-  }
-
-  if (!wasi_env_initialize_instance(wasi_env, store, instance)) {
-    printf("> Error initializing wasi env memory!\n");
     print_wasmer_error();
     return 1;
   }
@@ -117,6 +105,9 @@ int main(int argc, const char* argv[]) {
     return 1;
   }
 
+  wasm_module_delete(module);
+  wasm_instance_delete(instance);
+
   // Call.
   printf("Calling export...\n");
   printf("Evaluating \"%s\"\n", js_string);
@@ -128,14 +119,13 @@ int main(int argc, const char* argv[]) {
     printf("> Error calling function!\n");
     return 1;
   }
-  printf("Call completed\n");
 
-  if(true) {
+  {
+    FILE *memory_stream;
+    char* stdout;
+    size_t stdout_size = 0;
 
-    // NOTE: previously, this used open_memstream,
-    // which is not cross-platform
-    FILE *memory_stream = NULL;
-    memory_stream = tmpfile(); // stdio.h
+    memory_stream = open_memstream(&stdout, &stdout_size);
 
     if (NULL == memory_stream) {
       printf("> Error creating a memory stream.\n");
@@ -147,27 +137,17 @@ int main(int argc, const char* argv[]) {
 
     do {
       data_read_size = wasi_env_read_stdout(wasi_env, buffer, BUF_SIZE);
-      if (data_read_size == -1) {
-        printf("failed to read stdout: %s\n", strerror(errno));
-        print_wasmer_error();
-        return -1;
-      }
 
       if (data_read_size > 0) {
+        stdout_size += data_read_size;
         fwrite(buffer, sizeof(char), data_read_size, memory_stream);
       }
     } while (BUF_SIZE == data_read_size);
 
-    // print memory_stream
-    rewind(memory_stream);
-    fputs("WASI Stdout: ", stdout);
-    char buffer2[256];
-    while (!feof(memory_stream)) {
-      if (fgets(buffer2, 256, memory_stream) == NULL) break;
-      fputs(buffer2, stdout);
-    }
-    fputs("\n", stdout);
     fclose(memory_stream);
+
+    printf("WASI Stdout: `%.*s`\n", (int) stdout_size, stdout);
+    free(stdout);
   }
 
 
@@ -178,15 +158,10 @@ int main(int argc, const char* argv[]) {
   printf("Shutting down...\n");
   wasm_func_delete(run_func);
   wasi_env_delete(wasi_env);
-  wasm_module_delete(module);
-  wasm_instance_delete(instance);
   wasm_store_delete(store);
   wasm_engine_delete(engine);
 
   // All done.
   printf("Done.\n");
-
-  #endif // WASMER_WASI_ENABLED
-
   return 0;
 }

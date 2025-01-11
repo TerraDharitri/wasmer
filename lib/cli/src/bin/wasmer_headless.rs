@@ -1,3 +1,5 @@
+use wasmer_cli::cli::wasmer_main;
+
 fn main() {
-    wasmer_cli::run_cli();
+    wasmer_main();
 }

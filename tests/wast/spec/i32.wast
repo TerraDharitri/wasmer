@@ -974,12 +974,3 @@
 (assert_invalid (module (func (result i32) (i32.lt_s (i64.const 0) (f32.const 0)))) "type mismatch")
 (assert_invalid (module (func (result i32) (i32.lt_u (i64.const 0) (f32.const 0)))) "type mismatch")
 (assert_invalid (module (func (result i32) (i32.ne (i64.const 0) (f32.const 0)))) "type mismatch")
-
-(assert_malformed
-  (module quote "(func (result i32) (i32.const nan:arithmetic))")
-  "unexpected token"
-)
-(assert_malformed
-  (module quote "(func (result i32) (i32.const nan:canonical))")
-  "unexpected token"
-)

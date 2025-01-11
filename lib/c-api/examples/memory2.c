@@ -31,8 +31,7 @@ int main(int argc, const char *argv[]) {
   assert(memory1 == NULL);
   char* error = get_wasmer_error();
   printf("Found error string: %s\n", error);
-  // We can't validate the exact error message because it's not universal for the engines
-  // assert(0 == strcmp("The maximum requested memory (2147483647 pages) is greater than the maximum allowed memory (65536 pages)", error));
+  assert(0 == strcmp("The maximum requested memory (2147483647 pages) is greater than the maximum allowed memory (65536 pages)", error));
   free(error);
 
   wasm_memorytype_delete(memtype1);
@@ -73,8 +72,7 @@ int main(int argc, const char *argv[]) {
   assert(memory4 == NULL);
   error = get_wasmer_error();
   printf("Found error string: %s\n", error);
-  // We can't validate the exact error message because it's not universal for the engines
-  // assert(0 == strcmp("The minimum requested (2147483647 pages) memory is greater than the maximum allowed memory (65536 pages)", error));
+  assert(0 == strcmp("The minimum requested (2147483647 pages) memory is greater than the maximum allowed memory (65536 pages)", error));
   free(error);
 
   wasm_memorytype_delete(memtype4);
@@ -89,8 +87,7 @@ int main(int argc, const char *argv[]) {
   assert(memory5 == NULL);
   error = get_wasmer_error();
   printf("Found error string: %s\n", error);
-  // We can't validate the exact error message because it's not universal for the engines
-  // assert(0 == strcmp("The minimum requested (2147483647 pages) memory is greater than the maximum allowed memory (65536 pages)", error));
+  assert(0 == strcmp("The minimum requested (2147483647 pages) memory is greater than the maximum allowed memory (65536 pages)", error));
   free(error);
 
   wasm_memorytype_delete(memtype5);
@@ -105,8 +102,7 @@ int main(int argc, const char *argv[]) {
   assert(memory6 == NULL);
   error = get_wasmer_error();
   printf("Found error string: %s\n", error);
-  // We can't validate the exact error message because it's not universal for the engines
-  // assert(0 == strcmp("The memory is invalid because the maximum (10 pages) is less than the minimum (15 pages)", error));
+  assert(0 == strcmp("The memory is invalid because the maximum (10 pages) is less than the minimum (15 pages)", error));
   free(error);
 
   wasm_memorytype_delete(memtype6);
@@ -121,8 +117,7 @@ int main(int argc, const char *argv[]) {
   assert(memory7 == NULL);
   error = get_wasmer_error();
   printf("Found error string: %s\n", error);
-  // We can't validate the exact error message because it's not universal for the engines
-  // assert(0 == strcmp("The minimum requested (2147483647 pages) memory is greater than the maximum allowed memory (65536 pages)", error));
+  assert(0 == strcmp("The minimum requested (2147483647 pages) memory is greater than the maximum allowed memory (65536 pages)", error));
   free(error);
 
   wasm_memorytype_delete(memtype7);

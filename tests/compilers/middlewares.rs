@@ -1,11 +1,11 @@
 use anyhow::Result;
 
+use loupe::MemoryUsage;
 use std::sync::Arc;
 use wasmer::wasmparser::Operator;
-use wasmer::FunctionEnv;
 use wasmer::*;
 
-#[derive(Debug)]
+#[derive(Debug, MemoryUsage)]
 struct Add2MulGen {
     value_off: i32,
 }
@@ -47,7 +47,7 @@ impl FunctionMiddleware for Add2Mul {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, MemoryUsage)]
 struct FusionGen;
 
 #[derive(Debug)]
@@ -93,22 +93,20 @@ fn middleware_basic(mut config: crate::Config) -> Result<()> {
     config.set_middlewares(vec![
         Arc::new(Add2MulGen { value_off: 0 }) as Arc<dyn ModuleMiddleware>
     ]);
-    let mut store = config.store();
+    let store = config.store();
     let wat = r#"(module
         (func (export "add") (param i32 i32) (result i32)
            (i32.add (local.get 0)
                     (local.get 1)))
 )"#;
     let module = Module::new(&store, wat).unwrap();
-    let mut env = FunctionEnv::new(&mut store, ());
 
     let import_object = imports! {};
 
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
-    let f: TypedFunction<(i32, i32), i32> =
-        instance.exports.get_typed_function(&mut store, "add")?;
-    let result = f.call(&mut store, 4, 6)?;
+    let f: NativeFunc<(i32, i32), i32> = instance.exports.get_native_function("add")?;
+    let result = f.call(4, 6)?;
     assert_eq!(result, 24);
     Ok(())
 }
@@ -118,21 +116,20 @@ fn middleware_one_to_multi(mut config: crate::Config) -> Result<()> {
     config.set_middlewares(vec![
         Arc::new(Add2MulGen { value_off: 1 }) as Arc<dyn ModuleMiddleware>
     ]);
-    let mut store = config.store();
+    let store = config.store();
     let wat = r#"(module
         (func (export "add") (param i32 i32) (result i32)
            (i32.add (local.get 0)
                     (local.get 1)))
 )"#;
     let module = Module::new(&store, wat).unwrap();
-    let mut env = FunctionEnv::new(&mut store, ());
+
     let import_object = imports! {};
 
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
-    let f: TypedFunction<(i32, i32), i32> =
-        instance.exports.get_typed_function(&mut store, "add")?;
-    let result = f.call(&mut store, 4, 6)?;
+    let f: NativeFunc<(i32, i32), i32> = instance.exports.get_native_function("add")?;
+    let result = f.call(4, 6)?;
     assert_eq!(result, 25);
     Ok(())
 }
@@ -140,7 +137,7 @@ fn middleware_one_to_multi(mut config: crate::Config) -> Result<()> {
 #[compiler_test(middlewares)]
 fn middleware_multi_to_one(mut config: crate::Config) -> Result<()> {
     config.set_middlewares(vec![Arc::new(FusionGen) as Arc<dyn ModuleMiddleware>]);
-    let mut store = config.store();
+    let store = config.store();
     let wat = r#"(module
         (func (export "testfunc") (param i32 i32) (result i32)
            (local.get 0)
@@ -150,15 +147,13 @@ fn middleware_multi_to_one(mut config: crate::Config) -> Result<()> {
            (i32.mul))
 )"#;
     let module = Module::new(&store, wat).unwrap();
-    let mut env = FunctionEnv::new(&mut store, ());
+
     let import_object = imports! {};
 
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
-    let f: TypedFunction<(i32, i32), i32> = instance
-        .exports
-        .get_typed_function(&mut store, "testfunc")?;
-    let result = f.call(&mut store, 10, 20)?;
+    let f: NativeFunc<(i32, i32), i32> = instance.exports.get_native_function("testfunc")?;
+    let result = f.call(10, 20)?;
     assert_eq!(result, 10);
     Ok(())
 }
@@ -169,20 +164,20 @@ fn middleware_chain_order_1(mut config: crate::Config) -> Result<()> {
         Arc::new(Add2MulGen { value_off: 0 }) as Arc<dyn ModuleMiddleware>,
         Arc::new(Add2MulGen { value_off: 2 }) as Arc<dyn ModuleMiddleware>,
     ]);
-    let mut store = config.store();
+    let store = config.store();
     let wat = r#"(module
         (func (export "add") (param i32 i32) (result i32)
            (i32.add (local.get 0)
                     (local.get 1)))
 )"#;
     let module = Module::new(&store, wat).unwrap();
+
     let import_object = imports! {};
 
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
-    let f: TypedFunction<(i32, i32), i32> =
-        instance.exports.get_typed_function(&mut store, "add")?;
-    let result = f.call(&mut store, 4, 6)?;
+    let f: NativeFunc<(i32, i32), i32> = instance.exports.get_native_function("add")?;
+    let result = f.call(4, 6)?;
     assert_eq!(result, 24);
     Ok(())
 }
@@ -193,20 +188,20 @@ fn middleware_chain_order_2(mut config: crate::Config) -> Result<()> {
         Arc::new(Add2MulGen { value_off: 2 }) as Arc<dyn ModuleMiddleware>,
         Arc::new(Add2MulGen { value_off: 0 }) as Arc<dyn ModuleMiddleware>,
     ]);
-    let mut store = config.store();
+    let store = config.store();
     let wat = r#"(module
         (func (export "add") (param i32 i32) (result i32)
            (i32.add (local.get 0)
                     (local.get 1)))
 )"#;
     let module = Module::new(&store, wat).unwrap();
+
     let import_object = imports! {};
 
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
-    let f: TypedFunction<(i32, i32), i32> =
-        instance.exports.get_typed_function(&mut store, "add")?;
-    let result = f.call(&mut store, 4, 6)?;
+    let f: NativeFunc<(i32, i32), i32> = instance.exports.get_native_function("add")?;
+    let result = f.call(4, 6)?;
     assert_eq!(result, 48);
     Ok(())
 }

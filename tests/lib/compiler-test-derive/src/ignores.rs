@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use std::io::{BufRead, BufReader};
 
-pub const CFG_TARGET_OS: &str = env!("CFG_TARGET_OS");
-pub const CFG_TARGET_ARCH: &str = env!("CFG_TARGET_ARCH");
-pub const CFG_TARGET_ENV: &str = env!("CFG_TARGET_ENV");
+pub const CFG_TARGET_OS: &'static str = env!("CFG_TARGET_OS");
+pub const CFG_TARGET_ARCH: &'static str = env!("CFG_TARGET_ARCH");
+pub const CFG_TARGET_ENV: &'static str = env!("CFG_TARGET_ENV");
 
 #[derive(Debug, Clone)]
 struct IgnorePattern {
@@ -93,14 +93,14 @@ impl Ignores {
 
             // If the lines contains ` ` it means the test should be ignored
             // on the features exposed
-            if line.contains(' ') {
-                let l: Vec<&str> = line.splitn(2, ' ').collect();
+            if line.contains(" ") {
+                let l: Vec<&str> = line.splitn(2, " ").collect();
                 let mut os: Option<String> = None;
                 let mut arch: Option<String> = None;
                 let mut target_env: Option<String> = None;
                 let mut engine: Option<String> = None;
                 let mut compiler: Option<String> = None;
-                for alias in l[0].trim().split('+') {
+                for alias in l[0].trim().split("+") {
                     match alias {
                         // Operating Systems
                         "windows" | "macos" | "linux" => {
@@ -111,11 +111,11 @@ impl Ignores {
                             target_env = Some(alias.to_string());
                         }
                         // Chipset architectures
-                        "aarch64" | "x86" | "x64" | "riscv64" | "loongarch64" => {
+                        "aarch64" | "x86" | "x64" => {
                             arch = Some(alias.to_string());
                         }
                         // Engines
-                        "universal" | "engine" => {
+                        "universal" | "dylib" => {
                             engine = Some(alias.to_string());
                         }
                         // Compilers

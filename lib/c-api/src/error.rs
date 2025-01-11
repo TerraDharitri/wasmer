@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```rust
-//! # use wasmer_inline_c::assert_c;
+//! # use inline_c::assert_c;
 //! # fn main() {
 //! #    (assert_c! {
 //! # #include "tests/wasmer.h"
@@ -54,7 +54,7 @@ use std::ptr::{self, NonNull};
 use std::slice;
 
 thread_local! {
-    static LAST_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+    static LAST_ERROR: RefCell<Option<String>> = RefCell::new(None);
 }
 
 /// Rust function to register a new error.
@@ -131,7 +131,7 @@ pub unsafe extern "C" fn wasmer_last_error_message(
     };
 
     let error_message = match take_last_error() {
-        Some(err) => err,
+        Some(err) => err.to_string(),
         None => return 0,
     };
 

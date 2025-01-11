@@ -1,20 +1,17 @@
 use crate::compiler::CraneliftCompiler;
-use cranelift_codegen::{
-    isa::{lookup, TargetIsa},
-    settings::{self, Configurable},
-    CodegenResult,
-};
+use cranelift_codegen::isa::{lookup, TargetIsa};
+use cranelift_codegen::settings::{self, Configurable};
+use loupe::MemoryUsage;
 use std::sync::Arc;
 use wasmer_compiler::{
-    types::target::{Architecture, CpuFeature, Target},
-    Compiler, CompilerConfig, Engine, EngineBuilder, ModuleMiddleware,
+    Architecture, Compiler, CompilerConfig, CpuFeature, ModuleMiddleware, Target,
 };
 
 // Runtime Environment
 
 /// Possible optimization levels for the Cranelift codegen backend.
 #[non_exhaustive]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, MemoryUsage)]
 pub enum CraneliftOptLevel {
     /// No optimizations performed, minimizes compilation time by disabling most
     /// optimizations.
@@ -31,7 +28,7 @@ pub enum CraneliftOptLevel {
 ///
 /// This structure exposes a builder-like interface and is primarily
 /// consumed by `wasmer_engine::Engine::new`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, MemoryUsage)]
 pub struct Cranelift {
     enable_nan_canonicalization: bool,
     enable_verifier: bool,
@@ -70,7 +67,7 @@ impl Cranelift {
     }
 
     /// Generates the ISA for the provided target
-    pub fn isa(&self, target: &Target) -> CodegenResult<Arc<dyn TargetIsa>> {
+    pub fn isa(&self, target: &Target) -> Box<dyn TargetIsa> {
         let mut builder =
             lookup(target.triple().clone()).expect("construct Cranelift ISA for triple");
         // Cpu Features
@@ -121,30 +118,24 @@ impl Cranelift {
             builder.enable("has_lzcnt").expect("should be valid flag");
         }
 
-        builder.finish(self.flags(target))
+        builder.finish(self.flags())
     }
 
     /// Generates the flags for the compiler
-    pub fn flags(&self, target: &Target) -> settings::Flags {
+    pub fn flags(&self) -> settings::Flags {
         let mut flags = settings::builder();
 
-        // Enable probestack
+        // There are two possible traps for division, and this way
+        // we get the proper one if code traps.
         flags
-            .enable("enable_probestack")
+            .enable("avoid_div_traps")
             .expect("should be valid flag");
-
-        // Only inline probestack is supported on AArch64
-        if matches!(target.triple().architecture, Architecture::Aarch64(_)) {
-            flags
-                .set("probestack_strategy", "inline")
-                .expect("should be valid flag");
-        }
 
         if self.enable_pic {
             flags.enable("is_pic").expect("should be a valid flag");
         }
 
-        // We set up libcall trampolines in engine-universal.
+        // We set up libcall trampolines in engine-dylib and engine-universal.
         // These trampolines are always reachable through short jumps.
         flags
             .enable("use_colocated_libcalls")
@@ -174,6 +165,10 @@ impl Cranelift {
             )
             .expect("should be valid flag");
 
+        flags
+            .set("enable_simd", "true")
+            .expect("should be valid flag");
+
         let enable_nan_canonicalization = if self.enable_nan_canonicalization {
             "true"
         } else {
@@ -196,6 +191,10 @@ impl CompilerConfig for Cranelift {
         self.enable_verifier = true;
     }
 
+    fn enable_nan_canonicalization(&mut self) {
+        self.enable_nan_canonicalization = true;
+    }
+
     fn canonicalize_nans(&mut self, enable: bool) {
         self.enable_nan_canonicalization = enable;
     }
@@ -214,11 +213,5 @@ impl CompilerConfig for Cranelift {
 impl Default for Cranelift {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl From<Cranelift> for Engine {
-    fn from(config: Cranelift) -> Self {
-        EngineBuilder::new(config).engine()
     }
 }

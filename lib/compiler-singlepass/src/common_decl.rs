@@ -32,7 +32,6 @@ pub struct MachineState {
 /// A `MachineStateDiff` can only be applied after the `MachineStateDiff` its `last` field
 /// points to is already applied.
 #[derive(Clone, Debug, Default)]
-#[allow(dead_code)]
 pub struct MachineStateDiff {
     /// Link to the previous diff this diff is based on, or `None` if this is the first diff.
     pub last: Option<usize>,
@@ -84,7 +83,6 @@ pub enum MachineValue {
 
 /// A map of function states.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct FunctionStateMap {
     /// Initial.
     pub initial: MachineState,
@@ -117,7 +115,6 @@ pub enum Size {
 }
 
 /// A kind of suspend offset.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum SuspendOffset {
     /// A loop.
@@ -129,7 +126,6 @@ pub enum SuspendOffset {
 }
 
 /// Description of a machine code range following an offset.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct OffsetInfo {
     /// Exclusive range-end offset.
@@ -197,7 +193,7 @@ impl MachineState {
             .chain(
                 old.prev_frame
                     .iter()
-                    .filter(|(k, _)| !self.prev_frame.contains_key(k))
+                    .filter(|(k, _)| self.prev_frame.get(k).is_none())
                     .map(|(&k, _)| (k, None)),
             )
             .collect();
@@ -228,7 +224,8 @@ impl MachineState {
 impl MachineStateDiff {
     /// Creates a `MachineState` from the given `&FunctionStateMap`.
     pub fn _build_state(&self, m: &FunctionStateMap) -> MachineState {
-        let mut chain: Vec<&MachineStateDiff> = vec![self];
+        let mut chain: Vec<&MachineStateDiff> = vec![];
+        chain.push(self);
         let mut current = self.last;
         while let Some(x) = current {
             let that = &m.diffs[x];

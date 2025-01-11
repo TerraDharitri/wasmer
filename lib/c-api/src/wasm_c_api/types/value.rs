@@ -1,6 +1,6 @@
 use super::super::value::wasm_valkind_t;
 use std::convert::TryInto;
-use wasmer_api::Type;
+use wasmer_api::ValType;
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,34 +10,34 @@ pub enum wasm_valkind_enum {
     WASM_I64 = 1,
     WASM_F32 = 2,
     WASM_F64 = 3,
-    WASM_EXTERNREF = 128,
+    WASM_ANYREF = 128,
     WASM_FUNCREF = 129,
 }
 
-impl From<Type> for wasm_valkind_enum {
-    fn from(other: Type) -> Self {
+impl From<ValType> for wasm_valkind_enum {
+    fn from(other: ValType) -> Self {
         match other {
-            Type::I32 => Self::WASM_I32,
-            Type::I64 => Self::WASM_I64,
-            Type::F32 => Self::WASM_F32,
-            Type::F64 => Self::WASM_F64,
-            Type::V128 => todo!("no v128 type in Wasm C API yet!"),
-            Type::ExternRef => Self::WASM_EXTERNREF,
-            Type::FuncRef => Self::WASM_FUNCREF,
+            ValType::I32 => Self::WASM_I32,
+            ValType::I64 => Self::WASM_I64,
+            ValType::F32 => Self::WASM_F32,
+            ValType::F64 => Self::WASM_F64,
+            ValType::V128 => todo!("no v128 type in Wasm C API yet!"),
+            ValType::ExternRef => Self::WASM_ANYREF,
+            ValType::FuncRef => Self::WASM_FUNCREF,
         }
     }
 }
 
-impl From<wasm_valkind_enum> for Type {
+impl From<wasm_valkind_enum> for ValType {
     fn from(other: wasm_valkind_enum) -> Self {
         use wasm_valkind_enum::*;
         match other {
-            WASM_I32 => Type::I32,
-            WASM_I64 => Type::I64,
-            WASM_F32 => Type::F32,
-            WASM_F64 => Type::F64,
-            WASM_EXTERNREF => Type::ExternRef,
-            WASM_FUNCREF => Type::FuncRef,
+            WASM_I32 => ValType::I32,
+            WASM_I64 => ValType::I64,
+            WASM_F32 => ValType::F32,
+            WASM_F64 => ValType::F64,
+            WASM_ANYREF => ValType::ExternRef,
+            WASM_FUNCREF => ValType::FuncRef,
         }
     }
 }
@@ -58,20 +58,20 @@ impl Default for wasm_valtype_t {
 
 wasm_declare_boxed_vec!(valtype);
 
-impl From<wasm_valtype_t> for Type {
+impl From<wasm_valtype_t> for ValType {
     fn from(other: wasm_valtype_t) -> Self {
         (&other).into()
     }
 }
 
-impl From<&wasm_valtype_t> for Type {
+impl From<&wasm_valtype_t> for ValType {
     fn from(other: &wasm_valtype_t) -> Self {
         other.valkind.into()
     }
 }
 
-impl From<Type> for wasm_valtype_t {
-    fn from(other: Type) -> Self {
+impl From<ValType> for wasm_valtype_t {
+    fn from(other: ValType) -> Self {
         Self {
             valkind: other.into(),
         }

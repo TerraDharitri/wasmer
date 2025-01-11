@@ -1,179 +1,169 @@
-use std::{
-    error::Error,
-    fmt::{self, Display},
-};
+// use super::frame_info::{FrameInfo, GlobalFrameInfo, FRAME_INFO};
+use std::error::Error;
+use std::fmt;
+use std::sync::Arc;
+use wasm_bindgen::convert::FromWasmAbi;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsValue;
 
-use js_sys::Reflect;
-use wasm_bindgen::{prelude::*, JsValue};
+/// A struct representing an aborted instruction execution, with a message
+/// indicating the cause.
+#[wasm_bindgen]
+#[derive(Clone)]
+pub struct WasmerRuntimeError {
+    inner: Arc<RuntimeErrorSource>,
+}
 
-use crate::RuntimeError;
+/// This type is the same as `WasmerRuntimeError`.
+///
+/// We use the `WasmerRuntimeError` name to not collide with the
+/// `RuntimeError` in JS.
+pub type RuntimeError = WasmerRuntimeError;
 
+impl PartialEq for RuntimeError {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+/// The source of the `RuntimeError`.
 #[derive(Debug)]
-enum InnerTrap {
+enum RuntimeErrorSource {
+    Generic(String),
     User(Box<dyn Error + Send + Sync>),
-    Js(JsTrap),
+    Js(JsValue),
 }
 
-/// A struct representing a Trap
-#[wasm_bindgen(skip_typescript)]
-#[derive(Debug)]
-pub struct Trap {
-    inner: InnerTrap,
+/// This is a hack to ensure the error type is Send+Sync
+unsafe impl Send for RuntimeErrorSource {}
+unsafe impl Sync for RuntimeErrorSource {}
+
+impl fmt::Display for RuntimeErrorSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Generic(s) => write!(f, "{}", s),
+            Self::User(s) => write!(f, "{}", s),
+            Self::Js(s) => write!(f, "{}", s.as_string().unwrap_or("".to_string())),
+        }
+    }
 }
 
-impl Trap {
+impl RuntimeError {
+    /// Creates a new generic `RuntimeError` with the given `message`.
+    ///
+    /// # Example
+    /// ```
+    /// let trap = wasmer_engine::RuntimeError::new("unexpected error");
+    /// assert_eq!("unexpected error", trap.message());
+    /// ```
+    pub fn new<I: Into<String>>(message: I) -> Self {
+        RuntimeError {
+            inner: Arc::new(RuntimeErrorSource::Generic(message.into())),
+        }
+    }
+
+    /// Raises a custom user Error
+    #[deprecated(since = "2.1.1", note = "return a Result from host functions instead")]
+    pub fn raise(error: Box<dyn Error + Send + Sync>) -> ! {
+        let error = Self::user(error);
+        let js_error: JsValue = error.into();
+        wasm_bindgen::throw_val(js_error)
+    }
+
+    /// Creates a custom user Error.
+    ///
+    /// This error object can be passed through Wasm frames and later retrieved
+    /// using the `downcast` method.
     pub fn user(error: Box<dyn Error + Send + Sync>) -> Self {
-        Self {
-            inner: InnerTrap::User(error),
+        match error.downcast::<Self>() {
+            // The error is already a RuntimeError, we return it directly
+            Ok(runtime_error) => *runtime_error,
+            Err(error) => RuntimeError {
+                inner: Arc::new(RuntimeErrorSource::User(error)),
+            },
         }
     }
 
-    /// Attempts to downcast the `Trap` to a concrete type.
+    /// Returns a reference the `message` stored in `Trap`.
+    pub fn message(&self) -> String {
+        format!("{}", self.inner)
+    }
+
+    /// Attempts to downcast the `RuntimeError` to a concrete type.
     pub fn downcast<T: Error + 'static>(self) -> Result<T, Self> {
-        match self.inner {
+        match Arc::try_unwrap(self.inner) {
             // We only try to downcast user errors
-            InnerTrap::User(err) if err.is::<T>() => Ok(*err.downcast::<T>().unwrap()),
-            _ => Err(self),
+            Ok(RuntimeErrorSource::User(err)) if err.is::<T>() => Ok(*err.downcast::<T>().unwrap()),
+            Ok(inner) => Err(Self {
+                inner: Arc::new(inner),
+            }),
+            Err(inner) => Err(Self { inner }),
         }
     }
 
-    /// Attempts to downcast the `Trap` to a concrete type.
-    pub fn downcast_ref<T: Error + 'static>(&self) -> Option<&T> {
-        match &self.inner {
-            // We only try to downcast user errors
-            InnerTrap::User(err) if err.is::<T>() => err.downcast_ref::<T>(),
-            _ => None,
-        }
-    }
-
-    /// Returns true if the `Trap` is the same as T
+    /// Returns true if the `RuntimeError` is the same as T
     pub fn is<T: Error + 'static>(&self) -> bool {
-        match &self.inner {
-            InnerTrap::User(err) => err.is::<T>(),
+        match self.inner.as_ref() {
+            RuntimeErrorSource::User(err) => err.is::<T>(),
             _ => false,
         }
     }
 }
 
-#[wasm_bindgen]
-impl Trap {
-    /// A marker method to indicate that an object is an instance of the `Trap`
-    /// class.
-    pub fn __wbg_wasmer_trap() {}
+impl fmt::Debug for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeError")
+            .field("source", &self.inner)
+            .finish()
+    }
 }
 
-impl std::error::Error for Trap {
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "RuntimeError: {}", self.message())?;
+        Ok(())
+    }
+}
+
+impl std::error::Error for RuntimeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.inner {
-            InnerTrap::User(err) => Some(&**err),
+        match self.inner.as_ref() {
+            RuntimeErrorSource::User(err) => Some(&**err),
             _ => None,
         }
     }
 }
 
-impl fmt::Display for Trap {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.inner {
-            InnerTrap::User(e) => write!(f, "user: {e}"),
-            InnerTrap::Js(value) => write!(f, "js: {value}"),
+pub fn generic_of_jsval<T: FromWasmAbi<Abi = u32>>(
+    js: JsValue,
+    classname: &str,
+) -> Result<T, JsValue> {
+    use js_sys::{Object, Reflect};
+    let ctor_name = Object::get_prototype_of(&js).constructor().name();
+    if ctor_name == classname {
+        let ptr = Reflect::get(&js, &JsValue::from_str("ptr"))?;
+        match ptr.as_f64() {
+            Some(ptr_f64) => {
+                let foo = unsafe { T::from_abi(ptr_f64 as u32) };
+                Ok(foo)
+            }
+            None => {
+                // We simply relay the js value
+                Err(js)
+            }
         }
+    } else {
+        Err(js)
     }
 }
 
 impl From<JsValue> for RuntimeError {
-    fn from(value: JsValue) -> Self {
-        // We try to downcast the error and see if it's an instance of Trap
-        // instead, so we don't need to re-wrap it.
-        if let Some(obj) = value.dyn_ref() {
-            if let Some(trap) = downcast_from_ptr(obj) {
-                return trap.into();
-            }
-        }
-
-        RuntimeError::from(Trap {
-            inner: InnerTrap::Js(value.into()),
+    fn from(original: JsValue) -> Self {
+        // We try to downcast the error and see if it's
+        // an instance of RuntimeError instead, so we don't need
+        // to re-wrap it.
+        generic_of_jsval(original, "WasmerRuntimeError").unwrap_or_else(|js| RuntimeError {
+            inner: Arc::new(RuntimeErrorSource::Js(js)),
         })
-    }
-}
-
-/// This whole mechanism works because the JavaScript wrapper class has a static
-/// `__wbg_wasmer_trap()` method which marks that it is a [`Trap`].
-///
-/// If that method exists, we assume the pointer is valid and safe to cast back
-/// to our type.
-fn downcast_from_ptr(value: &JsValue) -> Option<Trap> {
-    if !value.is_object() {
-        return None;
-    }
-
-    let prototype = &Reflect::get_prototype_of(value).ok()?;
-    let class = prototype.constructor();
-    let key = JsValue::from_str("__wbg_wasmer_trap");
-
-    let marker_func: Option<js_sys::Function> = Reflect::get(&class, &key)
-        .and_then(|v: JsValue| v.dyn_into())
-        .ok();
-
-    if marker_func.is_none() {
-        // We couldn't find the marker, so it's something else.
-        return None;
-    }
-
-    // Safety: The marker function exists, therefore it's safe to convert back
-    // to a Trap.
-    unsafe {
-        // Note: this assumes the wrapper class generated by #[wasm_bindgen] will
-        // always have a `__destroy_into_raw()` method which consumes the `Trap`
-        // wrapper and returns a pointer.
-        //
-        // This is valid as of wasm-bindgen version 0.2.87
-        let key = JsValue::from_str("__destroy_into_raw");
-        let ptr = Reflect::get(value, &key)
-            .ok()
-            .and_then(|v| v.dyn_into::<js_sys::Function>().ok())
-            .and_then(|destroy_into_raw| destroy_into_raw.call0(value).ok())
-            .and_then(|ret| ret.as_f64())?;
-
-        Some(<Trap as wasm_bindgen::convert::FromWasmAbi>::from_abi(
-            ptr as u32,
-        ))
-    }
-}
-
-/// A `Send+Sync` version of a JavaScript error.
-#[derive(Debug)]
-enum JsTrap {
-    /// An error message.
-    Message(String),
-    /// Unable to determine the underlying error.
-    Unknown,
-}
-
-impl From<JsValue> for JsTrap {
-    fn from(value: JsValue) -> Self {
-        // Let's try some easy special cases first
-        if let Some(error) = value.dyn_ref::<js_sys::Error>() {
-            return JsTrap::Message(error.message().into());
-        }
-
-        if let Some(s) = value.as_string() {
-            return JsTrap::Message(s);
-        }
-
-        // Otherwise, we'll try to stringify the error and hope for the best
-        if let Some(obj) = value.dyn_ref::<js_sys::Object>() {
-            return JsTrap::Message(obj.to_string().into());
-        }
-
-        JsTrap::Unknown
-    }
-}
-
-impl Display for JsTrap {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            JsTrap::Message(m) => write!(f, "{m}"),
-            JsTrap::Unknown => write!(f, "unknown"),
-        }
     }
 }

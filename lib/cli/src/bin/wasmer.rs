@@ -1,8 +1,10 @@
-#[cfg(not(feature = "backend"))]
+use wasmer_cli::cli::wasmer_main;
+
+#[cfg(not(any(feature = "cranelift", feature = "singlepass", feature = "llvm")))]
 compile_error!(
-    "Either enable at least one backend, or compile the wasmer-headless binary instead.\nWith cargo, you can provide a compiler option with the --features flag.\n\nExample values:\n\n\t\t--features cranelift,singlepass\n\t\t--features jsc\n\t\t--features wamr\n\t\t--features wamr\n\t\t--features v8\n\n\n"
+    "Either enable at least one compiler, or compile the wasmer-headless binary instead"
 );
 
 fn main() {
-    wasmer_cli::run_cli();
+    wasmer_main();
 }

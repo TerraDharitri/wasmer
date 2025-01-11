@@ -1,8 +1,8 @@
 use anyhow::Result;
-use wasmer::{wat2wasm, Module, Store};
+use wasmer::{wat2wasm, Module};
 
 fn compile_and_compare(wasm: &[u8]) -> Result<()> {
-    let store = Store::default();
+    let store = Default::default();
 
     // compile for first time
     let module = Module::new(&store, wasm)?;

@@ -1,14 +1,15 @@
-use super::externals::{wasm_extern_t, wasm_extern_vec_t};
+use super::externals::wasm_extern_vec_t;
 use super::module::wasm_module_t;
-use super::store::{wasm_store_t, StoreRef};
+use super::store::wasm_store_t;
 use super::trap::wasm_trap_t;
+use crate::ordered_resolver::OrderedResolver;
+use std::sync::Arc;
 use wasmer_api::{Extern, Instance, InstantiationError};
 
 /// Opaque type representing a WebAssembly instance.
 #[allow(non_camel_case_types)]
 pub struct wasm_instance_t {
-    pub(crate) store: StoreRef,
-    pub(crate) inner: Instance,
+    pub(crate) inner: Arc<Instance>,
 }
 
 /// Creates a new instance from a WebAssembly module and a
@@ -36,28 +37,26 @@ pub struct wasm_instance_t {
 /// See the module's documentation.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_instance_new(
-    store: Option<&mut wasm_store_t>,
+    _store: Option<&wasm_store_t>,
     module: Option<&wasm_module_t>,
     imports: Option<&wasm_extern_vec_t>,
     trap: Option<&mut *mut wasm_trap_t>,
 ) -> Option<Box<wasm_instance_t>> {
-    let store = store?;
-    let mut store_mut = store.inner.store_mut();
     let module = module?;
     let imports = imports?;
 
     let wasm_module = &module.inner;
     let module_imports = wasm_module.imports();
     let module_import_count = module_imports.len();
-    let externs = imports
+    let resolver: OrderedResolver = imports
         .as_slice()
         .iter()
         .map(|imp| Extern::from(imp.as_ref().unwrap().as_ref().clone()))
         .take(module_import_count)
-        .collect::<Vec<Extern>>();
+        .collect();
 
-    let instance = match Instance::new_by_index(&mut store_mut, wasm_module, &externs) {
-        Ok(instance) => instance,
+    let instance = match Instance::new(wasm_module, &resolver) {
+        Ok(instance) => Arc::new(instance),
 
         Err(InstantiationError::Link(link_error)) => {
             crate::error::update_last_error(link_error);
@@ -80,23 +79,14 @@ pub unsafe extern "C" fn wasm_instance_new(
             return None;
         }
 
-        Err(e @ InstantiationError::DifferentStores) => {
-            crate::error::update_last_error(e);
-
-            return None;
-        }
-
-        Err(e @ InstantiationError::DifferentArchOS) => {
-            crate::error::update_last_error(e);
+        Err(InstantiationError::HostEnvInitialization(error)) => {
+            crate::error::update_last_error(error);
 
             return None;
         }
     };
 
-    Some(Box::new(wasm_instance_t {
-        store: store.inner.clone(),
-        inner: instance,
-    }))
+    Some(Box::new(wasm_instance_t { inner: instance }))
 }
 
 /// Deletes an instance.
@@ -112,7 +102,7 @@ pub unsafe extern "C" fn wasm_instance_delete(_instance: Option<Box<wasm_instanc
 /// # Example
 ///
 /// ```rust
-/// # use wasmer_inline_c::assert_c;
+/// # use inline_c::assert_c;
 /// # fn main() {
 /// #    (assert_c! {
 /// # #include "tests/wasmer.h"
@@ -196,29 +186,20 @@ pub unsafe extern "C" fn wasm_instance_exports(
     // own
     out: &mut wasm_extern_vec_t,
 ) {
-    let original_instance = instance;
     let instance = &instance.inner;
-    let extern_vec: Vec<Option<Box<wasm_extern_t>>> = instance
+    let extern_vec = instance
         .exports
         .iter()
-        .map(|(_name, r#extern)| {
-            Some(Box::new(wasm_extern_t::new(
-                original_instance.store.clone(),
-                r#extern.clone(),
-            )))
-        })
+        .map(|(_name, r#extern)| Some(Box::new(r#extern.clone().into())))
         .collect();
+
     out.set_buffer(extern_vec);
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(target_os = "windows"))]
     use inline_c::assert_c;
-    #[cfg(target_os = "windows")]
-    use wasmer_inline_c::assert_c;
 
-    #[cfg_attr(coverage, ignore)]
     #[test]
     fn test_instance_new() {
         (assert_c! {

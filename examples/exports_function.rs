@@ -17,7 +17,9 @@
 //!
 //! Ready?
 
-use wasmer::{imports, wat2wasm, Instance, Module, Store, TypedFunction, Value};
+use wasmer::{imports, wat2wasm, Instance, Module, Store, Value};
+use wasmer_compiler_cranelift::Cranelift;
+use wasmer_engine_universal::Universal;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Let's declare the Wasm module with the text representation.
@@ -35,7 +37,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     // Create a Store.
-    let mut store = Store::default();
+    // Note that we don't need to specify the engine/compiler if we want to use
+    // the default provided by Wasmer.
+    // You can use `Store::default()` for that.
+    let store = Store::new(&Universal::new(Cranelift::default()).engine());
 
     println!("Compiling module...");
     // Let's compile the Wasm module.
@@ -46,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Instantiating module...");
     // Let's instantiate the Wasm module.
-    let instance = Instance::new(&mut store, &module, &import_object)?;
+    let instance = Instance::new(&module, &import_object)?;
 
     // Here we go.
     //
@@ -68,26 +73,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Let's call the `sum` exported function. The parameters are a
     // slice of `Value`s. The results are a boxed slice of `Value`s.
     let args = [Value::I32(1), Value::I32(2)];
-    let result = sum.call(&mut store, &args)?;
+    let result = sum.call(&args)?;
 
     println!("Results: {:?}", result);
     assert_eq!(result.to_vec(), vec![Value::I32(3)]);
 
     // That was fun. But what if we can get rid of the `Value`s? Well,
-    // that's possible with the `TypedFunction` API. The function
+    // that's possible with the `NativeFunction` API. The function
     // will use native Rust values.
     //
-    // Note that `typed` takes 2 generic parameters: `Args` and
+    // Note that `native` takes 2 generic parameters: `Args` and
     // `Rets`, respectively for the parameters and the results. If
     // those values don't match the exported function signature, an
     // error will be raised.
-    let sum_typed: TypedFunction<(i32, i32), i32> = sum.typed(&mut store)?;
+    let sum_native = sum.native::<(i32, i32), i32>()?;
 
     println!("Calling `sum` function (natively)...");
     // Let's call the `sum` exported function. The parameters are
     // statically typed Rust values of type `i32` and `i32`. The
     // result, in this case particular case, in a unit of type `i32`.
-    let result = sum_typed.call(&mut store, 3, 4)?;
+    let result = sum_native.call(3, 4)?;
 
     println!("Results: {:?}", result);
     assert_eq!(result, 7);

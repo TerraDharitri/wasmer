@@ -516,27 +516,6 @@ pub enum wasmer_parser_operator_t {
     F64x2ConvertLowI32x4U,
     I32x4TruncSatF64x2SZero,
     I32x4TruncSatF64x2UZero,
-    I8x16RelaxedSwizzle,
-    I32x4RelaxedTruncSatF32x4S,
-    I32x4RelaxedTruncSatF32x4U,
-    I32x4RelaxedTruncSatF64x2SZero,
-    I32x4RelaxedTruncSatF64x2UZero,
-    F32x4Fma,
-    F32x4Fms,
-    F64x2Fma,
-    F64x2Fms,
-    I8x16LaneSelect,
-    I16x8LaneSelect,
-    I32x4LaneSelect,
-    I64x2LaneSelect,
-    F32x4RelaxedMin,
-    F32x4RelaxedMax,
-    F64x2RelaxedMin,
-    F64x2RelaxedMax,
-    I16x8RelaxedQ15mulrS,
-    I16x8DotI8x16I7x16S,
-    I32x4DotI8x16I7x16AddS,
-    F32x4RelaxedDotBf16x8AddF32x4,
 }
 
 impl<'a> From<&Operator<'a>> for wasmer_parser_operator_t {
@@ -556,7 +535,7 @@ impl<'a> From<&Operator<'a>> for wasmer_parser_operator_t {
             O::Delegate { .. } => Self::Delegate,
             O::Throw { .. } => Self::Throw,
             O::Rethrow { .. } => Self::Rethrow,
-            // O::Unwind removed
+            O::Unwind => Self::Unwind,
             O::End => Self::End,
             O::Br { .. } => Self::Br,
             O::BrIf { .. } => Self::BrIf,
@@ -1048,8 +1027,8 @@ impl<'a> From<&Operator<'a>> for wasmer_parser_operator_t {
             O::V128Store16Lane { .. } => Self::V128Store16Lane,
             O::V128Store32Lane { .. } => Self::V128Store32Lane,
             O::V128Store64Lane { .. } => Self::V128Store64Lane,
-            O::I8x16AvgrU => Self::I8x16RoundingAverageU,
-            O::I16x8AvgrU => Self::I16x8RoundingAverageU,
+            O::I8x16RoundingAverageU => Self::I8x16RoundingAverageU,
+            O::I16x8RoundingAverageU => Self::I16x8RoundingAverageU,
             O::I16x8Q15MulrSatS => Self::I16x8Q15MulrSatS,
             O::F32x4DemoteF64x2Zero => Self::F32x4DemoteF64x2Zero,
             O::F64x2PromoteLowF32x4 => Self::F64x2PromoteLowF32x4,
@@ -1057,24 +1036,6 @@ impl<'a> From<&Operator<'a>> for wasmer_parser_operator_t {
             O::F64x2ConvertLowI32x4U => Self::F64x2ConvertLowI32x4U,
             O::I32x4TruncSatF64x2SZero => Self::I32x4TruncSatF64x2SZero,
             O::I32x4TruncSatF64x2UZero => Self::I32x4TruncSatF64x2UZero,
-            O::I8x16RelaxedSwizzle => Self::I8x16RelaxedSwizzle,
-            O::I32x4RelaxedTruncF32x4S => Self::I32x4RelaxedTruncSatF32x4S,
-            O::I32x4RelaxedTruncF32x4U => Self::I32x4RelaxedTruncSatF32x4U,
-            O::I32x4RelaxedTruncF64x2SZero => Self::I32x4RelaxedTruncSatF64x2SZero,
-            O::I32x4RelaxedTruncF64x2UZero => Self::I32x4RelaxedTruncSatF64x2UZero,
-            O::F32x4RelaxedMadd => Self::F32x4Fma,
-            O::I8x16RelaxedLaneselect => Self::I8x16LaneSelect,
-            O::I16x8RelaxedLaneselect => Self::I16x8LaneSelect,
-            O::I32x4RelaxedLaneselect => Self::I32x4LaneSelect,
-            O::I64x2RelaxedLaneselect => Self::I64x2LaneSelect,
-            O::F32x4RelaxedMin => Self::F32x4RelaxedMin,
-            O::F32x4RelaxedMax => Self::F32x4RelaxedMax,
-            O::F64x2RelaxedMin => Self::F64x2RelaxedMin,
-            O::F64x2RelaxedMax => Self::F64x2RelaxedMax,
-            O::I16x8RelaxedQ15mulrS => Self::I16x8RelaxedQ15mulrS,
-            _ => {
-                panic!("unimplemented operator {operator:?}");
-            }
         }
     }
 }

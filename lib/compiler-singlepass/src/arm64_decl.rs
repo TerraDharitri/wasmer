@@ -1,18 +1,16 @@
 //! ARM64 structures.
 
-use crate::{
-    common_decl::{MachineState, MachineValue, RegisterIndex},
-    location::{CombinedRegister, Reg as AbstractReg},
-};
+use crate::common_decl::{MachineState, MachineValue, RegisterIndex};
+use crate::location::CombinedRegister;
+use crate::location::Reg as AbstractReg;
 use std::collections::BTreeMap;
 use std::slice::Iter;
-use wasmer_compiler::types::target::CallingConvention;
+use wasmer_compiler::CallingConvention;
 use wasmer_types::Type;
 
 /// General-purpose registers.
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[allow(clippy::upper_case_acronyms)]
 pub enum GPR {
     X0 = 0,
     X1 = 1,
@@ -52,7 +50,6 @@ pub enum GPR {
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[allow(dead_code)]
-#[allow(clippy::upper_case_acronyms)]
 pub enum NEON {
     V0 = 0,
     V1 = 1,
@@ -93,14 +90,17 @@ impl AbstractReg for GPR {
         self as usize > 18
     }
     fn is_reserved(self) -> bool {
-        !matches!(self.into_index(), 0..=16 | 19..=27)
+        match self.into_index() {
+            0..=16 | 19..=27 => false,
+            _ => true,
+        }
     }
     fn into_index(self) -> usize {
         self as usize
     }
     fn from_index(n: usize) -> Result<GPR, ()> {
         match n {
-            0..=31 => Ok(*GPR::iterator().nth(n).unwrap()),
+            0..=31 => Ok(GPR::iterator().nth(n).unwrap().clone()),
             _ => Err(()),
         }
     }
@@ -141,9 +141,6 @@ impl AbstractReg for GPR {
         ];
         GPRS.iter()
     }
-    fn to_dwarf(self) -> u16 {
-        self.into_index() as u16
-    }
 }
 
 impl AbstractReg for NEON {
@@ -158,7 +155,7 @@ impl AbstractReg for NEON {
     }
     fn from_index(n: usize) -> Result<NEON, ()> {
         match n {
-            0..=31 => Ok(*NEON::iterator().nth(n).unwrap()),
+            0..=31 => Ok(NEON::iterator().nth(n).unwrap().clone()),
             _ => Err(()),
         }
     }
@@ -199,14 +196,10 @@ impl AbstractReg for NEON {
         ];
         NEONS.iter()
     }
-    fn to_dwarf(self) -> u16 {
-        self.into_index() as u16 + 64
-    }
 }
 
 /// A machine register under the x86-64 architecture.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[allow(clippy::upper_case_acronyms)]
 pub enum ARM64Register {
     /// General-purpose registers.
     GPR(GPR),
@@ -257,7 +250,7 @@ impl ArgumentRegisterAllocator {
     ) -> Option<ARM64Register> {
         match calling_convention {
             CallingConvention::SystemV | CallingConvention::AppleAarch64 => {
-                static GPR_SEQ: &[GPR] = &[
+                static GPR_SEQ: &'static [GPR] = &[
                     GPR::X0,
                     GPR::X1,
                     GPR::X2,
@@ -267,7 +260,7 @@ impl ArgumentRegisterAllocator {
                     GPR::X6,
                     GPR::X7,
                 ];
-                static NEON_SEQ: &[NEON] = &[
+                static NEON_SEQ: &'static [NEON] = &[
                     NEON::V0,
                     NEON::V1,
                     NEON::V2,
@@ -314,6 +307,6 @@ pub fn new_machine_state() -> MachineState {
         register_values: vec![MachineValue::Undefined; 32 + 32],
         prev_frame: BTreeMap::new(),
         wasm_stack: vec![],
-        wasm_inst_offset: usize::MAX,
+        wasm_inst_offset: std::usize::MAX,
     }
 }

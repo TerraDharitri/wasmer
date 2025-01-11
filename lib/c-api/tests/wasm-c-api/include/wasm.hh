@@ -12,7 +12,7 @@
 #include <string>
 
 #ifndef WASM_API_EXTERN
-#if defined(_WIN32) && !defined(__MINGW32__) && !defined(LIBWASM_STATIC)
+#ifdef _WIN32
 #define WASM_API_EXTERN __declspec(dllimport)
 #else
 #define WASM_API_EXTERN
@@ -128,7 +128,7 @@ public:
     return v;
   }
 
-  // TODO: This can't be used for e.g. vec<Value>
+  // TODO: This can't be used for e.g. vec<Val>
   auto deep_copy() const -> vec {
     auto v = vec(size_);
     if (v) for (size_t i = 0; i < size_; ++i) v.data_[i] = data_[i]->copy();
@@ -246,25 +246,25 @@ struct Limits {
 
 // Value Types
 
-enum class ValueKind : uint8_t {
+enum class ValKind : uint8_t {
   I32, I64, F32, F64,
   ANYREF = 128, FUNCREF,
 };
 
-inline bool is_num(ValueKind k) { return k < ValueKind::ANYREF; }
-inline bool is_ref(ValueKind k) { return k >= ValueKind::ANYREF; }
+inline bool is_num(ValKind k) { return k < ValKind::ANYREF; }
+inline bool is_ref(ValKind k) { return k >= ValKind::ANYREF; }
 
 
-class WASM_API_EXTERN ValueType {
+class WASM_API_EXTERN ValType {
 public:
-  ValueType() = delete;
-  ~ValueType();
+  ValType() = delete;
+  ~ValType();
   void operator delete(void*);
 
-  static auto make(ValueKind) -> own<ValueType>;
-  auto copy() const -> own<ValueType>;
+  static auto make(ValKind) -> own<ValType>;
+  auto copy() const -> own<ValType>;
 
-  auto kind() const -> ValueKind;
+  auto kind() const -> ValKind;
   auto is_num() const -> bool { return wasm::is_num(kind()); }
   auto is_ref() const -> bool { return wasm::is_ref(kind()); }
 };
@@ -311,14 +311,14 @@ public:
   ~FuncType();
 
   static auto make(
-    ownvec<ValueType>&& params = ownvec<ValueType>::make(),
-    ownvec<ValueType>&& results = ownvec<ValueType>::make()
+    ownvec<ValType>&& params = ownvec<ValType>::make(),
+    ownvec<ValType>&& results = ownvec<ValType>::make()
   ) -> own<FuncType>;
 
   auto copy() const -> own<FuncType>;
 
-  auto params() const -> const ownvec<ValueType>&;
-  auto results() const -> const ownvec<ValueType>&;
+  auto params() const -> const ownvec<ValType>&;
+  auto results() const -> const ownvec<ValType>&;
 };
 
 
@@ -329,10 +329,10 @@ public:
   GlobalType() = delete;
   ~GlobalType();
 
-  static auto make(own<ValueType>&&, Mutability) -> own<GlobalType>;
+  static auto make(own<ValType>&&, Mutability) -> own<GlobalType>;
   auto copy() const -> own<GlobalType>;
 
-  auto content() const -> const ValueType*;
+  auto content() const -> const ValType*;
   auto mutability() const -> Mutability;
 };
 
@@ -344,10 +344,10 @@ public:
   TableType() = delete;
   ~TableType();
 
-  static auto make(own<ValueType>&&, Limits) -> own<TableType>;
+  static auto make(own<ValType>&&, Limits) -> own<TableType>;
   auto copy() const -> own<TableType>;
 
-  auto element() const -> const ValueType*;
+  auto element() const -> const ValType*;
   auto limits() const -> const Limits&;
 };
 
@@ -423,8 +423,8 @@ public:
 
 // Values
 
-class Value {
-  ValueKind kind_;
+class Val {
+  ValKind kind_;
   union impl {
     int32_t i32;
     int64_t i64;
@@ -433,34 +433,34 @@ class Value {
     Ref* ref;
   } impl_;
 
-  Value(ValueKind kind, impl impl) : kind_(kind), impl_(impl) {}
+  Val(ValKind kind, impl impl) : kind_(kind), impl_(impl) {}
 
 public:
-  Value() : kind_(ValueKind::ANYREF) { impl_.ref = nullptr; }
-  explicit Value(int32_t i) : kind_(ValueKind::I32) { impl_.i32 = i; }
-  explicit Value(int64_t i) : kind_(ValueKind::I64) { impl_.i64 = i; }
-  explicit Value(float32_t z) : kind_(ValueKind::F32) { impl_.f32 = z; }
-  explicit Value(float64_t z) : kind_(ValueKind::F64) { impl_.f64 = z; }
-  explicit Value(own<Ref>&& r) : kind_(ValueKind::ANYREF) { impl_.ref = r.release(); }
+  Val() : kind_(ValKind::ANYREF) { impl_.ref = nullptr; }
+  explicit Val(int32_t i) : kind_(ValKind::I32) { impl_.i32 = i; }
+  explicit Val(int64_t i) : kind_(ValKind::I64) { impl_.i64 = i; }
+  explicit Val(float32_t z) : kind_(ValKind::F32) { impl_.f32 = z; }
+  explicit Val(float64_t z) : kind_(ValKind::F64) { impl_.f64 = z; }
+  explicit Val(own<Ref>&& r) : kind_(ValKind::ANYREF) { impl_.ref = r.release(); }
 
-  Value(Value&& that) : kind_(that.kind_), impl_(that.impl_) {
+  Val(Val&& that) : kind_(that.kind_), impl_(that.impl_) {
     if (is_ref()) that.impl_.ref = nullptr;
   }
 
-  ~Value() {
+  ~Val() {
     reset();
   }
 
   auto is_num() const -> bool { return wasm::is_num(kind_); }
   auto is_ref() const -> bool { return wasm::is_ref(kind_); }
 
-  static auto i32(int32_t x) -> Value { return Value(x); }
-  static auto i64(int64_t x) -> Value { return Value(x); }
-  static auto f32(float32_t x) -> Value { return Value(x); }
-  static auto f64(float64_t x) -> Value { return Value(x); }
-  static auto ref(own<Ref>&& x) -> Value { return Value(std::move(x)); }
-  template<class T> inline static auto make(T x) -> Value;
-  template<class T> inline static auto make(own<T>&& x) -> Value;
+  static auto i32(int32_t x) -> Val { return Val(x); }
+  static auto i64(int64_t x) -> Val { return Val(x); }
+  static auto f32(float32_t x) -> Val { return Val(x); }
+  static auto f64(float64_t x) -> Val { return Val(x); }
+  static auto ref(own<Ref>&& x) -> Val { return Val(std::move(x)); }
+  template<class T> inline static auto make(T x) -> Val;
+  template<class T> inline static auto make(own<T>&& x) -> Val;
 
   void reset() {
     if (is_ref() && impl_.ref) {
@@ -469,23 +469,23 @@ public:
     }
   }
 
-  void reset(Value& that) {
+  void reset(Val& that) {
     reset();
     kind_ = that.kind_;
     impl_ = that.impl_;
     if (is_ref()) that.impl_.ref = nullptr;
   }
 
-  auto operator=(Value&& that) -> Value& {
+  auto operator=(Val&& that) -> Val& {
     reset(that);
     return *this;
   } 
 
-  auto kind() const -> ValueKind { return kind_; }
-  auto i32() const -> int32_t { assert(kind_ == ValueKind::I32); return impl_.i32; }
-  auto i64() const -> int64_t { assert(kind_ == ValueKind::I64); return impl_.i64; }
-  auto f32() const -> float32_t { assert(kind_ == ValueKind::F32); return impl_.f32; }
-  auto f64() const -> float64_t { assert(kind_ == ValueKind::F64); return impl_.f64; }
+  auto kind() const -> ValKind { return kind_; }
+  auto i32() const -> int32_t { assert(kind_ == ValKind::I32); return impl_.i32; }
+  auto i64() const -> int64_t { assert(kind_ == ValKind::I64); return impl_.i64; }
+  auto f32() const -> float32_t { assert(kind_ == ValKind::F32); return impl_.f32; }
+  auto f64() const -> float64_t { assert(kind_ == ValKind::F64); return impl_.f64; }
   auto ref() const -> Ref* { assert(is_ref()); return impl_.ref; }
   template<class T> inline auto get() const -> T;
 
@@ -496,45 +496,45 @@ public:
     return own<Ref>(ref);
   }
 
-  auto copy() const -> Value {
+  auto copy() const -> Val {
     if (is_ref() && impl_.ref != nullptr) {
       // TODO(mvsc): MVSC cannot handle this:
       // impl impl = {.ref = impl_.ref->copy().release()};
       impl impl;
       impl.ref = impl_.ref->copy().release();
-      return Value(kind_, impl);
+      return Val(kind_, impl);
     } else {
-      return Value(kind_, impl_);
+      return Val(kind_, impl_);
     }
   }
 };
 
 
-template<> inline auto Value::make<int32_t>(int32_t x) -> Value { return Value(x); }
-template<> inline auto Value::make<int64_t>(int64_t x) -> Value { return Value(x); }
-template<> inline auto Value::make<float32_t>(float32_t x) -> Value { return Value(x); }
-template<> inline auto Value::make<float64_t>(float64_t x) -> Value { return Value(x); }
-template<> inline auto Value::make<Ref>(own<Ref>&& x) -> Value {
-  return Value(std::move(x));
+template<> inline auto Val::make<int32_t>(int32_t x) -> Val { return Val(x); }
+template<> inline auto Val::make<int64_t>(int64_t x) -> Val { return Val(x); }
+template<> inline auto Val::make<float32_t>(float32_t x) -> Val { return Val(x); }
+template<> inline auto Val::make<float64_t>(float64_t x) -> Val { return Val(x); }
+template<> inline auto Val::make<Ref>(own<Ref>&& x) -> Val {
+  return Val(std::move(x));
 }
 
-template<> inline auto Value::make<uint32_t>(uint32_t x) -> Value {
-  return Value(static_cast<int32_t>(x));
+template<> inline auto Val::make<uint32_t>(uint32_t x) -> Val {
+  return Val(static_cast<int32_t>(x));
 }
-template<> inline auto Value::make<uint64_t>(uint64_t x) -> Value {
-  return Value(static_cast<int64_t>(x));
+template<> inline auto Val::make<uint64_t>(uint64_t x) -> Val {
+  return Val(static_cast<int64_t>(x));
 }
 
-template<> inline auto Value::get<int32_t>() const -> int32_t { return i32(); }
-template<> inline auto Value::get<int64_t>() const -> int64_t { return i64(); }
-template<> inline auto Value::get<float32_t>() const -> float32_t { return f32(); }
-template<> inline auto Value::get<float64_t>() const -> float64_t { return f64(); }
-template<> inline auto Value::get<Ref*>() const -> Ref* { return ref(); }
+template<> inline auto Val::get<int32_t>() const -> int32_t { return i32(); }
+template<> inline auto Val::get<int64_t>() const -> int64_t { return i64(); }
+template<> inline auto Val::get<float32_t>() const -> float32_t { return f32(); }
+template<> inline auto Val::get<float64_t>() const -> float64_t { return f64(); }
+template<> inline auto Val::get<Ref*>() const -> Ref* { return ref(); }
 
-template<> inline auto Value::get<uint32_t>() const -> uint32_t {
+template<> inline auto Val::get<uint32_t>() const -> uint32_t {
   return static_cast<uint32_t>(i32());
 }
-template<> inline auto Value::get<uint64_t>() const -> uint64_t {
+template<> inline auto Val::get<uint64_t>() const -> uint64_t {
   return static_cast<uint64_t>(i64());
 }
 
@@ -654,8 +654,8 @@ public:
   Func() = delete;
   ~Func();
 
-  using callback = auto (*)(const vec<Value>&, vec<Value>&) -> own<Trap>;
-  using callback_with_env = auto (*)(void*, const vec<Value>&, vec<Value>&) -> own<Trap>;
+  using callback = auto (*)(const vec<Val>&, vec<Val>&) -> own<Trap>;
+  using callback_with_env = auto (*)(void*, const vec<Val>&, vec<Val>&) -> own<Trap>;
 
   static auto make(Store*, const FuncType*, callback) -> own<Func>;
   static auto make(Store*, const FuncType*, callback_with_env,
@@ -666,7 +666,7 @@ public:
   auto param_arity() const -> size_t;
   auto result_arity() const -> size_t;
 
-  auto call(const vec<Value>&, vec<Value>&) const -> own<Trap>;
+  auto call(const vec<Val>&, vec<Val>&) const -> own<Trap>;
 };
 
 
@@ -677,12 +677,12 @@ public:
   Global() = delete;
   ~Global();
 
-  static auto make(Store*, const GlobalType*, const Value&) -> own<Global>;
+  static auto make(Store*, const GlobalType*, const Val&) -> own<Global>;
   auto copy() const -> own<Global>;
 
   auto type() const -> own<GlobalType>;
-  auto get() const -> Value;
-  void set(const Value&);
+  auto get() const -> Val;
+  void set(const Val&);
 };
 
 

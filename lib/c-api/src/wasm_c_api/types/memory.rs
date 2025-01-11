@@ -40,7 +40,7 @@ impl wasm_memorytype_t {
 
     pub(crate) fn inner(&self) -> &WasmMemoryType {
         match &self.extern_type.inner {
-            WasmExternType::Memory(wasm_memory_type) => wasm_memory_type,
+            WasmExternType::Memory(wasm_memory_type) => &wasm_memory_type,
             _ => {
                 unreachable!("Data corruption: `wasm_memorytype_t` does not contain a memory type")
             }
@@ -75,7 +75,7 @@ pub struct wasm_limits_t {
     pub max: u32,
 }
 
-const LIMITS_MAX_SENTINEL: u32 = u32::MAX;
+const LIMITS_MAX_SENTINEL: u32 = u32::max_value();
 
 #[no_mangle]
 pub unsafe extern "C" fn wasm_memorytype_limits(memory_type: &wasm_memorytype_t) -> &wasm_limits_t {

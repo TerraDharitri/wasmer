@@ -8,9 +8,6 @@ use super::types::wasm_byte_vec_t;
 /// # Example
 ///
 /// See the module's documentation.
-///
-/// # Safety
-/// This function is unsafe in order to be callable from C.
 #[cfg(feature = "wat")]
 #[no_mangle]
 pub unsafe extern "C" fn wat2wasm(wat: &wasm_byte_vec_t, out: &mut wasm_byte_vec_t) {
@@ -20,16 +17,14 @@ pub unsafe extern "C" fn wat2wasm(wat: &wasm_byte_vec_t, out: &mut wasm_byte_vec
             crate::error::update_last_error(err);
             out.data = std::ptr::null_mut();
             out.size = 0;
+            return;
         }
     };
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(target_os = "windows"))]
     use inline_c::assert_c;
-    #[cfg(target_os = "windows")]
-    use wasmer_inline_c::assert_c;
 
     #[test]
     fn test_wat2wasm() {
