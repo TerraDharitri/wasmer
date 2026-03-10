@@ -14,24 +14,40 @@ jobs:
   build:
     name: Build dynamic library for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+
     strategy:
       matrix:
         include:
-          - os: ubuntu-18.04
+          - os: ubuntu-22.04
             artifact_name: libwasmer_linux_amd64.so
             make_target: capi-linux-amd64
-          - os: macos-11
+          - os: macos-12
             artifact_name: libwasmer_darwin_amd64.dylib
             make_target: capi-osx-amd64
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Make
-        run: make ${{ matrix.make_target }}
-      - name: Save artifacts
-        uses: actions/upload-artifact@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
         with:
-          name: libs
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build library
+        run: make ${{ matrix.make_target }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libs-${{ matrix.os }}
           path: |
             target/release/*.so
             target/release/*.dylib
