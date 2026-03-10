@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev-laya
   workflow_dispatch:
   pull_request:
 
