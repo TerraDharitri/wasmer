@@ -14,7 +14,6 @@ jobs:
   build:
     name: Build dynamic library for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-
     strategy:
       matrix:
         include:
@@ -24,23 +23,11 @@ jobs:
           - os: macos-14
             artifact_name: libwasmer_darwin_amd64.dylib
             make_target: capi-osx-amd64
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust 1.72.0
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.72.0
-          components: rustfmt, clippy
-
-      - name: Show Rust version
-        run: rustc --version
-
+        uses: actions/checkout@v3
       - name: Make
         run: make ${{ matrix.make_target }}
-
       - name: Save artifacts
         uses: actions/upload-artifact@v4
         with:
