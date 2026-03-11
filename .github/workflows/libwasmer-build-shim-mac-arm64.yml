@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     name: Build shim library for MacOS ARM64
-    runs-on: macos-14
+    runs-on: macos-13
 
     steps:
       - name: Checkout code
