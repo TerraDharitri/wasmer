@@ -12,28 +12,44 @@ env:
 
 jobs:
   build:
-    name: Build dynamic library for ${{ matrix.os }}
+    name: Build shim library for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+
     strategy:
       matrix:
         include:
           - os: ubuntu-22.04
             artifact_name: libwasmer_linux_amd64.so
             make_target: capi-linux-amd64
-          - os: macos-14
+
+          - os: macos-13
             artifact_name: libwasmer_darwin_amd64.dylib
             make_target: capi-osx-amd64
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Make
-        run: make ${{ matrix.make_target }}
-      - name: Save artifacts
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Linux only)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf make
+
+      - name: Install dependencies (macOS only)
+        if: matrix.os == 'macos-13'
+        run: |
+          brew install make
+
+      - name: Build library
+        run: |
+          make ${{ matrix.make_target }}
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libs
-          path: |
-            target/release/*.so
-            target/release/*.dylib
-            lib/runtime-c-api/wasmer.h
-            lib/runtime-c-api/wasmer.hh
+          name: artifacts-${{ runner.os }}
+          path: target/release/${{ matrix.artifact_name }}
