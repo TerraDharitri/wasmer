@@ -136,3 +136,5 @@ incremental = true # whether or not incremental compilation is enabled
                    # variable. Incremental is only used for path sources.
 overflow-checks = true # use overflow checks for integer arithmetic.
                    # Passes the `-C overflow-checks=...` flag to the compiler.
+[patch.crates-io]
+wasmparser = { git = "https://github.com/TerraDharitri/wasmparser.rs", rev = "10f7d106780ed44ce57245a0f54af7d0a9e067bf" }
