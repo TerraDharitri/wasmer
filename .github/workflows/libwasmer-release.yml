@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-18.04
+          - os: ubuntu-22.04
             artifact_name: libwasmer_linux_amd64.so
             make_target: capi-linux-amd64
           - os: macos-14
