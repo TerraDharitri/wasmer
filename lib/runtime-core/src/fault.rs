@@ -1047,3 +1047,15 @@ pub unsafe fn get_fault_info(siginfo: *const c_void, ucontext: *mut c_void) -> F
         known_registers,
     }
 }
+
+/// Get fault info from siginfo and ucontext (fallback for unsupported platforms).
+#[cfg(not(any(
+    all(target_os = "freebsd", target_arch = "aarch64"),
+    all(target_os = "freebsd", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "macos", target_arch = "x86_64")
+)))]
+pub unsafe fn get_fault_info(_siginfo: *const c_void, _ucontext: *mut c_void) -> FaultInfo {
+    unimplemented!("get_fault_info is not implemented for this platform")
+}

@@ -6,7 +6,7 @@ use std::{
     ops::{Add, Sub},
 };
 
-use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 /// The page size in bytes of a wasm page.
 pub const WASM_PAGE_SIZE: usize = 65_536;
@@ -17,7 +17,19 @@ pub const WASM_MAX_PAGES: usize = 65_536;
 pub const WASM_MIN_PAGES: usize = 256;
 
 /// Units of WebAssembly pages (as specified to be 65,536 bytes).
-#[derive(Serialize, Deserialize, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[repr(C)]
 pub struct Pages(pub u32);
 

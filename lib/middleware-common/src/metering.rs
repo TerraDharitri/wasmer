@@ -6,7 +6,7 @@ use wasmer_runtime_core::{
     Instance,
 };
 
-use crate::metering_costs::{get_opcode_index, get_local_allocate_cost_index};
+use crate::metering_costs::{get_local_allocate_cost_index, get_opcode_index};
 use crate::runtime_breakpoints::{push_runtime_breakpoint, BREAKPOINT_VALUE_OUT_OF_GAS};
 
 static FIELD_USED_POINTS: InternalField = InternalField::allocate();
@@ -120,14 +120,9 @@ impl<'q> FunctionMiddleware for Metering<'q> {
         Ok(())
     }
 
-    fn feed_local(
-        &mut self,
-        _ty: WpType,
-        n: usize,
-        _loc: u32,
-    ) -> Result<(), Self::Error>{
+    fn feed_local(&mut self, _ty: WpType, n: usize, _loc: u32) -> Result<(), Self::Error> {
         if n > self.unmetered_locals {
-            let metered_locals = (n  - self.unmetered_locals) as u32;
+            let metered_locals = (n - self.unmetered_locals) as u32;
             let cost_index = get_local_allocate_cost_index();
             let cost = self.opcode_costs[cost_index];
             // n is already limited by Wasmparser; the following casting and multiplication are

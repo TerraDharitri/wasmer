@@ -646,9 +646,8 @@ fn execute_wasm(options: &Run) -> Result<(), String> {
         #[cfg(feature = "wabt")]
         {
             let features = options.features.into_wabt_features();
-            wasm_binary = wabt::wat2wasm_with_features(wasm_binary, features).map_err(|e| {
-                format!("Can't convert from wast to wasm: {}", e)
-            })?;
+            wasm_binary = wabt::wat2wasm_with_features(wasm_binary, features)
+                .map_err(|e| format!("Can't convert from wast to wasm: {}", e))?;
         }
 
         #[cfg(not(feature = "wabt"))]
@@ -1109,7 +1108,7 @@ fn get_compiler_by_backend(backend: Backend, _opts: &Run) -> Option<Box<dyn Comp
 
         #[cfg(feature = "backend-llvm")]
         Backend::LLVM => Box::new(LLVMCompiler::new()),
-        
+
         Backend::Auto => return None,
     })
 }

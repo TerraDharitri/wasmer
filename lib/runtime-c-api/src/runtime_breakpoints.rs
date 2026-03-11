@@ -1,9 +1,7 @@
 use crate::instance::wasmer_instance_t;
 
 use wasmer_middleware_common::runtime_breakpoints::{
-    set_runtime_breakpoint_value,
-    get_runtime_breakpoint_value,
-    BREAKPOINT_VALUE_NO_BREAKPOINT
+    get_runtime_breakpoint_value, set_runtime_breakpoint_value, BREAKPOINT_VALUE_NO_BREAKPOINT,
 };
 
 #[allow(clippy::cast_ptr_alignment)]

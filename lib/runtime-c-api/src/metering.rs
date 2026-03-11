@@ -18,12 +18,9 @@ pub static mut OPCODE_COSTS: [u32; OPCODE_COUNT] = [0; OPCODE_COUNT];
 #[allow(clippy::cast_ptr_alignment)]
 #[cfg(feature = "metering")]
 #[no_mangle]
-pub unsafe extern "C" fn wasmer_set_opcode_costs(
-    opcode_costs_pointer: *const u32,
-) {
+pub unsafe extern "C" fn wasmer_set_opcode_costs(opcode_costs_pointer: *const u32) {
     OPCODE_COSTS.copy_from_slice(slice::from_raw_parts(opcode_costs_pointer, OPCODE_COUNT));
 }
-
 
 // returns gas used
 #[allow(clippy::cast_ptr_alignment)]
@@ -67,7 +64,6 @@ pub unsafe extern "C" fn wasmer_instance_set_points_limit(
     let instance = &mut *(instance as *mut wasmer_runtime::Instance);
     metering::set_points_limit(instance, limit)
 }
-
 
 /// Creates a new Module with gas limit from the given wasm bytes.
 ///
@@ -138,7 +134,6 @@ unsafe fn get_metered_compiler() -> impl Compiler {
     });
     c
 }
-
 
 /*** placeholder implementation if metering feature off ***/
 

@@ -18,11 +18,7 @@ use std::{any::Any, ptr::NonNull};
 
 use std::collections::HashMap;
 
-use rkyv::{
-    Archive,
-    Serialize as RkyvSerialize,
-    Deserialize as RkyvDeserialize,
-};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 pub mod sys {
     pub use crate::sys::*;
@@ -160,7 +156,9 @@ impl CompilerConfig {
 }
 
 /// An exception table for a `RunnableModule`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone, Debug, Default, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct ExceptionTable {
     /// Mappings from offsets in generated machine code to the corresponding exception code.
     pub offset_to_code: HashMap<usize, ExceptionCode>,
@@ -173,7 +171,20 @@ impl ExceptionTable {
 }
 
 /// The code of an exception.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub enum ExceptionCode {
     /// An `unreachable` opcode was executed.
     Unreachable = 0,

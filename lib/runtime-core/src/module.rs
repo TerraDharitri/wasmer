@@ -17,7 +17,7 @@ use crate::{
 
 use indexmap::IndexMap;
 
-use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::backend::CacheGen;
 #[cfg(feature = "generate-debug-information")]
@@ -191,7 +191,18 @@ pub struct ImportName {
 /// Used in [`ModuleInfo`] to access function signatures ([`SigIndex`]s,
 /// [`FuncSig`]), [`GlobalInit`]s, [`MemoryDescriptor`]s, and
 /// [`TableDescriptor`]s.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub enum ExportIndex {
     /// Function export index. [`FuncIndex`] is a type-safe handle referring to
     /// a Wasm function.
@@ -315,14 +326,27 @@ impl<K: TypedIndex> StringTable<K> {
     pub fn to_vec(&self) -> Vec<&str> {
         self.table
             .values()
-            .map(|(offset, length)|
-                 &self.buffer[(*offset as usize)..(*offset as usize) + (*length as usize)])
+            .map(|(offset, length)| {
+                &self.buffer[(*offset as usize)..(*offset as usize) + (*length as usize)]
+            })
             .collect()
     }
 }
 
 /// A type-safe handle referring to a module namespace.
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct NamespaceIndex(u32);
 
 impl TypedIndex for NamespaceIndex {
@@ -338,7 +362,19 @@ impl TypedIndex for NamespaceIndex {
 }
 
 /// A type-safe handle referring to a name in a module namespace.
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct NameIndex(u32);
 
 impl TypedIndex for NameIndex {

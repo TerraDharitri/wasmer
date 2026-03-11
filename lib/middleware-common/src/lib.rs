@@ -17,6 +17,6 @@ pub mod call_trace;
 pub mod metering;
 pub mod metering_costs;
 
-pub mod runtime_breakpoints;
-pub mod opcode_trace;
 pub mod opcode_control;
+pub mod opcode_trace;
+pub mod runtime_breakpoints;

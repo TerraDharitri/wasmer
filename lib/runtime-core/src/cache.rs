@@ -2,8 +2,8 @@
 //! serializing compiled wasm code to a binary format.  The binary format can be persisted,
 //! and loaded to allow skipping compilation and fast startup.
 
-use crate::{module::ModuleInfo, sys::Memory, sys::ArchivableMemory};
-use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize};
+use crate::{module::ModuleInfo, sys::ArchivableMemory, sys::Memory};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use std::{io, mem, slice};
 
 /// Indicates the invalid type of invalid cache file
@@ -152,7 +152,6 @@ impl ArtifactHeader {
     }
 }
 
-
 /// Inner information of an Artifact.
 #[derive(Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ArtifactInner {
@@ -203,7 +202,7 @@ impl Artifact {
     /// Deserializes an `Artifact` from the given byte slice.
     pub fn deserialize(bytes: &[u8]) -> Result<Self, Error> {
         let (_, body_slice) = ArtifactHeader::read_from_slice(bytes)?;
-        
+
         let inner = serde_bench::deserialize(body_slice)
             .map_err(|e| Error::DeserializeError(format!("{:#?}", e)))?;
 
@@ -241,13 +240,13 @@ mod tests {
     use super::ArtifactInner;
     use super::Memory;
     use super::ModuleInfo;
-    use std::collections::HashMap;
-    use crate::structures::Map;
     use crate::module::StringTable;
+    use crate::structures::Map;
     use rkyv::ser::serializers::AllocSerializer;
     use rkyv::ser::Serializer as RkyvSerializer;
-    use rkyv::Deserialize;
     use rkyv::Archived;
+    use rkyv::Deserialize;
+    use std::collections::HashMap;
 
     #[test]
     fn test_rkyv_artifact() {
@@ -256,7 +255,7 @@ mod tests {
 
         let module_info = make_empty_module_info();
         let artifact = Artifact::from_parts(
-            Box::new(module_info), 
+            Box::new(module_info),
             b"test_backend".to_vec().into_boxed_slice(),
             memory,
         );
@@ -267,12 +266,21 @@ mod tests {
         assert!(serialized.len() > 0);
         print!("{:?}", serialized);
 
-        let archived: &Archived<Artifact>
-            = unsafe { rkyv::archived_root::<Artifact>(&serialized[..]) };
+        let archived: &Archived<Artifact> =
+            unsafe { rkyv::archived_root::<Artifact>(&serialized[..]) };
 
-        let deserialized_artifact = Deserialize::<Artifact, _>::deserialize(archived, &mut rkyv::Infallible).unwrap();
-        unsafe { assert_eq!(deserialized_artifact.inner.compiled_code.as_slice(), artifact.inner.compiled_code.as_slice()) };
-        assert_eq!(deserialized_artifact.inner.compiled_code.protection(), artifact.inner.compiled_code.protection());
+        let deserialized_artifact =
+            Deserialize::<Artifact, _>::deserialize(archived, &mut rkyv::Infallible).unwrap();
+        unsafe {
+            assert_eq!(
+                deserialized_artifact.inner.compiled_code.as_slice(),
+                artifact.inner.compiled_code.as_slice()
+            )
+        };
+        assert_eq!(
+            deserialized_artifact.inner.compiled_code.protection(),
+            artifact.inner.compiled_code.protection()
+        );
     }
 
     #[test]
@@ -293,12 +301,21 @@ mod tests {
         assert!(serialized.len() > 0);
         print!("{:?}", serialized);
 
-        let archived: &Archived<ArtifactInner> 
-            = unsafe { rkyv::archived_root::<ArtifactInner>(&serialized[..]) };
+        let archived: &Archived<ArtifactInner> =
+            unsafe { rkyv::archived_root::<ArtifactInner>(&serialized[..]) };
 
-        let deserialized_artifact_inner = Deserialize::<ArtifactInner, _>::deserialize(archived, &mut rkyv::Infallible).unwrap();
-        unsafe { assert_eq!(deserialized_artifact_inner.compiled_code.as_slice(), artifact_inner.compiled_code.as_slice()) };
-        assert_eq!(deserialized_artifact_inner.compiled_code.protection(), artifact_inner.compiled_code.protection());
+        let deserialized_artifact_inner =
+            Deserialize::<ArtifactInner, _>::deserialize(archived, &mut rkyv::Infallible).unwrap();
+        unsafe {
+            assert_eq!(
+                deserialized_artifact_inner.compiled_code.as_slice(),
+                artifact_inner.compiled_code.as_slice()
+            )
+        };
+        assert_eq!(
+            deserialized_artifact_inner.compiled_code.protection(),
+            artifact_inner.compiled_code.protection()
+        );
     }
 
     fn make_empty_module_info() -> ModuleInfo {

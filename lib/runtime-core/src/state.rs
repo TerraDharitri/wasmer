@@ -7,18 +7,38 @@ use std::collections::BTreeMap;
 use std::ops::Bound::{Included, Unbounded};
 use std::sync::Arc;
 
-use rkyv::{
-    Archive,
-    Serialize as RkyvSerialize,
-    Deserialize as RkyvDeserialize,
-};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 /// An index to a register
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct RegisterIndex(pub usize);
 
 /// A kind of wasm or constant value
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub enum WasmAbstractValue {
     /// A wasm runtime value
     Runtime,
@@ -44,7 +64,9 @@ pub struct MachineState {
 }
 
 /// A diff of two `MachineState`s.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone, Debug, Default, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct MachineStateDiff {
     /// Last.
     pub last: Option<usize>,
@@ -70,7 +92,18 @@ pub struct MachineStateDiff {
 }
 
 /// A kind of machine value.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub enum MachineValue {
     /// Undefined.
     Undefined,
@@ -94,7 +127,18 @@ pub enum MachineValue {
 
 /// A kind of machine value used in MachineValue::TwoHalves. Created so that MachineValue does not
 /// reference two more MachineValues as part of TwoHalves.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub enum MachineSubvalue {
     /// Undefined.
     Undefined,

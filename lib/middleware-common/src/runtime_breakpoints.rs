@@ -1,9 +1,9 @@
 use wasmer_runtime_core::{
     codegen::{Event, EventSink, FunctionMiddleware, InternalEvent},
+    error::RuntimeError,
     module::ModuleInfo,
     vm::InternalField,
     wasmparser::{Operator, Type as WpType, TypeOrFuncType as WpTypeOrFuncType},
-    error::RuntimeError,
     Instance,
 };
 
@@ -12,7 +12,6 @@ pub const BREAKPOINT_VALUE_NO_BREAKPOINT: u64 = 0;
 pub const BREAKPOINT_VALUE_EXECUTION_FAILED: u64 = 1;
 pub const BREAKPOINT_VALUE_OUT_OF_GAS: u64 = 4;
 pub const BREAKPOINT_VALUE_MEMORY_LIMIT: u64 = 5;
-
 
 pub struct RuntimeBreakpointHandler {}
 
@@ -31,18 +30,12 @@ impl FunctionMiddleware for RuntimeBreakpointHandler {
         sink: &mut EventSink<'a, 'b>,
         _source_loc: u32,
     ) -> Result<(), Self::Error> {
-
         let must_add_breakpoint = match op {
-            Event::Wasm(&ref op) | Event::WasmOwned(ref op) => {
-                match *op {
-                    Operator::Call { .. }
-                    | Operator::CallIndirect { .. } => {
-                        true
-                    }
-                    _ => false
-                }
-            }
-            _ => false
+            Event::Wasm(&ref op) | Event::WasmOwned(ref op) => match *op {
+                Operator::Call { .. } | Operator::CallIndirect { .. } => true,
+                _ => false,
+            },
+            _ => false,
         };
 
         sink.push(op);
@@ -59,7 +52,9 @@ impl FunctionMiddleware for RuntimeBreakpointHandler {
                 ty: WpTypeOrFuncType::Type(WpType::EmptyBlockType),
             }));
             sink.push(Event::Internal(InternalEvent::Breakpoint(Box::new(|_| {
-                Err(Box::new(RuntimeError(Box::new("breakpoint reached".to_string()))))
+                Err(Box::new(RuntimeError(Box::new(
+                    "breakpoint reached".to_string(),
+                ))))
             }))));
             sink.push(Event::WasmOwned(Operator::End));
         }
@@ -76,7 +71,9 @@ pub fn push_runtime_breakpoint(sink: &mut EventSink, value: u64) {
         FIELD_RUNTIME_BREAKPOINT_VALUE.index() as _,
     )));
     sink.push(Event::Internal(InternalEvent::Breakpoint(Box::new(|_| {
-        Err(Box::new(RuntimeError(Box::new("breakpoint reached".to_string()))))
+        Err(Box::new(RuntimeError(Box::new(
+            "breakpoint reached".to_string(),
+        ))))
     }))));
 }
 

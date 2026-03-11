@@ -10,22 +10,23 @@ use crate::{
     wasmer_byte_array, wasmer_result_t,
 };
 use libc::c_uint;
+use std::collections::HashMap;
 use std::{
     convert::TryFrom,
     ffi::{c_void, CStr},
     os::raw::c_char,
-    ptr, slice,
-    sync::Arc,
+    ptr,
     result::Result,
+    slice,
+    sync::Arc,
 };
 use wasmer_runtime::{Ctx, Global, Memory, Module, Table};
 use wasmer_runtime_core::{
     export::{Context, Export, FuncPointer},
-    import::{ImportObject, Namespace, ImportObjectIterator},
+    import::{ImportObject, ImportObjectIterator, Namespace},
     module::ImportName,
     types::{FuncSig, Type},
 };
-use std::{collections::HashMap};
 
 pub enum ImportError {
     ModuleNameError,
@@ -80,14 +81,18 @@ pub unsafe extern "C" fn wasmer_import_object_cache_from_imports(
     let imports_result = wasmer_create_import_object_from_imports(imports, imports_len);
     let import_object = match imports_result {
         Err(ImportError::ModuleNameError) => {
-            update_last_error(CApiError { msg: "error converting module name to string".to_string() });
+            update_last_error(CApiError {
+                msg: "error converting module name to string".to_string(),
+            });
             return wasmer_result_t::WASMER_ERROR;
         }
         Err(ImportError::ImportNameError) => {
-            update_last_error(CApiError { msg: "error converting import_name to string".to_string() });
+            update_last_error(CApiError {
+                msg: "error converting import_name to string".to_string(),
+            });
             return wasmer_result_t::WASMER_ERROR;
         }
-        Ok(created_imports_object) => created_imports_object
+        Ok(created_imports_object) => created_imports_object,
     };
 
     if GLOBAL_IMPORT_OBJECT != (0 as *mut ImportObject) {
@@ -95,7 +100,7 @@ pub unsafe extern "C" fn wasmer_import_object_cache_from_imports(
     }
 
     GLOBAL_IMPORT_OBJECT = Box::into_raw(Box::new(import_object));
-    return wasmer_result_t::WASMER_OK
+    return wasmer_result_t::WASMER_OK;
 }
 
 /// Assembles an ImportObject from a list of imports received on the C API
@@ -117,7 +122,7 @@ pub unsafe fn wasmer_create_import_object_from_imports(
         let module_name = if let Ok(s) = std::str::from_utf8(module_name) {
             s
         } else {
-            return Err(ImportError::ModuleNameError)
+            return Err(ImportError::ModuleNameError);
         };
         let import_name = slice::from_raw_parts(
             import.import_name.bytes,
@@ -126,7 +131,7 @@ pub unsafe fn wasmer_create_import_object_from_imports(
         let import_name = if let Ok(s) = std::str::from_utf8(import_name) {
             s
         } else {
-            return Err(ImportError::ImportNameError)
+            return Err(ImportError::ImportNameError);
         };
 
         let namespace = namespaces.entry(module_name).or_insert_with(Namespace::new);
@@ -155,7 +160,7 @@ pub unsafe fn wasmer_create_import_object_from_imports(
     for (module_name, namespace) in namespaces.into_iter() {
         import_object.register(module_name, namespace);
     }
-    
+
     Ok(import_object)
 }
 

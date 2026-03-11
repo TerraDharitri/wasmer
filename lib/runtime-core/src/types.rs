@@ -2,11 +2,23 @@
 //! convert to other represenations.
 
 use crate::{memory::MemoryType, module::ModuleInfo, structures::TypedIndex, units::Pages};
+use rkyv::{with::AsOwned, Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use std::{borrow::Cow, convert::TryFrom};
-use rkyv::{Archive, Serialize as RkyvSerialize, Deserialize as RkyvDeserialize, with::AsOwned};
 
 /// Represents a WebAssembly type.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub enum Type {
     /// The `i32` type.
     I32,
@@ -30,7 +42,9 @@ impl std::fmt::Display for Type {
 ///
 /// As the number of types in WebAssembly expand,
 /// this structure will expand as well.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum Value {
     /// The `i32` type.
     I32(i32),
@@ -247,7 +261,18 @@ macro_rules! convert_value_impl {
 convert_value_impl!(u8, i8, u16, i16, u32, i32, u64, i64, f32, f64);
 
 /// Kinds of element types.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub enum ElementType {
     /// Any wasm function.
     Anyfunc,
@@ -279,7 +304,9 @@ impl TableDescriptor {
 /// A const value initializer.
 /// Over time, this will be able to represent more and more
 /// complex expressions.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum Initializer {
     /// Corresponds to a `const.*` instruction.
     Const(Value),
@@ -288,7 +315,18 @@ pub enum Initializer {
 }
 
 /// Describes the mutability and type of a Global
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct GlobalDescriptor {
     /// Mutable flag.
     pub mutable: bool,
@@ -306,7 +344,18 @@ pub struct GlobalInit {
 }
 
 /// A wasm memory descriptor.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct MemoryDescriptor {
     /// The minimum number of allowed pages.
     pub minimum: Pages,
@@ -354,7 +403,18 @@ impl MemoryDescriptor {
 
 /// The signature of a function that is either implemented
 /// in a wasm module or exposed to wasm by the host.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct FuncSig {
     #[with(AsOwned)]
     params: Cow<'static, [Type]>,
@@ -507,7 +567,19 @@ define_local_or_import![
 ];
 
 /// Index for signature.
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct SigIndex(u32);
 impl TypedIndex for SigIndex {
     #[doc(hidden)]
