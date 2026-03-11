@@ -6,7 +6,6 @@ on:
       - main
       - dev-laya
   pull_request:
-  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,59 +16,36 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
-      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-20.04
+          - os: ubuntu-22.04
+            artifact_name: libwasmer_linux_amd64.so
             make_target: capi-linux-amd64
-            artifact_name: linux-amd64
-
           - os: macos-12
+            artifact_name: libwasmer_darwin_amd64.dylib
             make_target: capi-osx-amd64
-            artifact_name: darwin-amd64
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.59.0
-
-      - name: Cache Cargo registry + build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            clang \
-            cmake \
-            pkg-config \
-            patchelf \
-            build-essential
-
+          sudo apt-get install -y clang cmake pkg-config
       - name: Build library
-        run: |
-          make ${{ matrix.make_target }}
-
-      - name: List build outputs
-        run: |
-          ls -R target/release || true
+        run: make ${{ matrix.make_target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wasmer-${{ matrix.artifact_name }}
+          name: libs-${{ matrix.os }}
           path: |
-            target/release/libwasmer*.so
-            target/release/libwasmer*.dylib
-            target/release/build/*/out/wasmer.h*
+            target/release/*.so
+            target/release/*.dylib
+            lib/runtime-c-api/wasmer.h
+            lib/runtime-c-api/wasmer.hh
