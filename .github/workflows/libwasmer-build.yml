@@ -29,10 +29,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust 1.59.0
+      - name: Install Rust 1.72.0
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.59.0
+          toolchain: 1.72.0
           components: rustfmt, clippy
 
       - name: Show Rust version
