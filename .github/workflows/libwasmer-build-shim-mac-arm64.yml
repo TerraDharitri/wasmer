@@ -31,12 +31,10 @@ jobs:
           go mod tidy
           go build -buildmode=c-shared -ldflags="-w" \
           -o $GITHUB_WORKSPACE/libwasmer_darwin_arm64_shim.dylib .
-
       - name: Fix dylib id
         run: |
           install_name_tool -id @rpath/libwasmer_darwin_arm64_shim.dylib \
           $GITHUB_WORKSPACE/libwasmer_darwin_arm64_shim.dylib
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
